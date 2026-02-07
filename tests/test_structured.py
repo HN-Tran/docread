@@ -24,3 +24,14 @@ def test_parse_structured_output_malformed():
     result = parse_structured_output(raw, ["vendor"])
     assert result.data is None
     assert result.warnings
+
+
+def test_parse_structured_output_keeps_array_fields():
+    raw = '{"columns":["Name","Preis"],"rows":[["A","10"],["B","20"]],"notes":"ok"}'
+    result = parse_structured_output(raw, ["columns", "rows", "notes"])
+    assert result.data == {
+        "columns": ["Name", "Preis"],
+        "rows": [["A", "10"], ["B", "20"]],
+        "notes": "ok",
+    }
+    assert result.warnings == []

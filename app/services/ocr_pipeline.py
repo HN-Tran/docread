@@ -16,11 +16,17 @@ from app.services.structured import parse_structured_output
 PLAIN_TASK_OCR_TEXT = "ocr_text"
 PLAIN_TASK_DESCRIBE_IMAGE = "describe_image"
 PLAIN_TASK_READ_SCENE_TEXT = "read_scene_text"
+PLAIN_TASK_TABLE_MARKDOWN = "extract_table_markdown"
+PLAIN_TASK_SUMMARIZE_DOCUMENT = "summarize_document"
 SUPPORTED_PLAIN_TASKS = (
     PLAIN_TASK_OCR_TEXT,
     PLAIN_TASK_DESCRIBE_IMAGE,
     PLAIN_TASK_READ_SCENE_TEXT,
+    PLAIN_TASK_TABLE_MARKDOWN,
+    PLAIN_TASK_SUMMARIZE_DOCUMENT,
 )
+MAX_TOKEN_LIMIT = 128000
+AUTO_SCHEMA_NAME = "auto"
 
 
 @dataclass
@@ -45,6 +51,8 @@ class OCRPipeline:
     ) -> None:
         if default_token_limit < 1:
             raise ValueError("default_token_limit muss eine positive ganze Zahl sein")
+        if default_token_limit > MAX_TOKEN_LIMIT:
+            raise ValueError(f"default_token_limit darf {MAX_TOKEN_LIMIT} nicht überschreiten")
         self.ollama_client = ollama_client
         self.default_model = default_model
         self.default_token_limit = default_token_limit
@@ -123,6 +131,20 @@ class OCRPipeline:
                 "Lies und transkribiere den gesamten sichtbaren Text aus diesem Bild. "
                 "Wenn kein Text sichtbar ist, gib exakt aus: Kein sichtbarer Text."
             )
+        if selected_task == PLAIN_TASK_TABLE_MARKDOWN:
+            return (
+                "Extrahiere alle sichtbaren Tabellen aus diesem Dokument. "
+                "Gib das Ergebnis als Markdown zurück. "
+                "Wenn mehrere Tabellen vorhanden sind, nummeriere sie mit Überschriften "
+                "(z. B. 'Tabelle 1'). "
+                "Wenn keine Tabelle vorhanden ist, gib exakt aus: Keine Tabelle erkannt."
+            )
+        if selected_task == PLAIN_TASK_SUMMARIZE_DOCUMENT:
+            return (
+                "Erstelle eine knappe, sachliche Zusammenfassung des Dokuments auf Deutsch. "
+                "Gib 3 bis 6 Stichpunkte zurück. "
+                "Wenn kein lesbarer Inhalt vorhanden ist, gib exakt aus: Kein lesbarer Inhalt."
+            )
         raise ValueError(
             f"Unbekannte Aufgabe '{selected_task}'. Unterstützte Aufgaben: {', '.join(SUPPORTED_PLAIN_TASKS)}"
         )
@@ -136,6 +158,43 @@ class OCRPipeline:
             schema_description=schema["description"],
             schema_json=json.dumps(schema["fields"], indent=2),
             field_names=", ".join(schema["fields"].keys()),
+        )
+
+    def _build_schema_selection_prompt(self) -> str:
+        schema_lines = [
+            f"- {name}: {meta['description']}" for name, meta in SCHEMA_REGISTRY.items()
+        ]
+        return (
+            "Du klassifizierst ein Dokument in genau eines der folgenden OCR-Schemata.\n"
+            "Antwortformat: Gib ausschließlich den schema_name zurück, ohne Zusatztext.\n"
+            "Verfügbare schema_name:\n"
+            f"{chr(10).join(schema_lines)}\n"
+            f"Erlaubte Antworten: {', '.join(SCHEMA_REGISTRY.keys())}"
+        )
+
+    async def _auto_detect_schema(
+        self,
+        *,
+        prepared_image: bytes,
+        selected_model: str,
+        selected_token_limit: int,
+    ) -> str:
+        classifier_prompt = self._build_schema_selection_prompt()
+        raw_choice = await self.ollama_client.run_ocr(
+            image_bytes=prepared_image,
+            prompt=classifier_prompt,
+            model=selected_model,
+            num_ctx=selected_token_limit,
+        )
+        normalized = raw_choice.strip().lower().replace("`", "")
+        for schema_name in SCHEMA_REGISTRY:
+            if normalized == schema_name or normalized.startswith(schema_name):
+                return schema_name
+        for schema_name in SCHEMA_REGISTRY:
+            if schema_name in normalized:
+                return schema_name
+        raise ValueError(
+            "Schema konnte nicht automatisch erkannt werden. Bitte schema_name manuell wählen."
         )
 
     async def run(
@@ -155,6 +214,8 @@ class OCRPipeline:
         selected_token_limit = self.default_token_limit if token_limit is None else token_limit
         if selected_token_limit < 1:
             raise ValueError("token_limit muss eine positive ganze Zahl sein")
+        if selected_token_limit > MAX_TOKEN_LIMIT:
+            raise ValueError(f"token_limit darf {MAX_TOKEN_LIMIT} nicht überschreiten")
         if content_type == "application/pdf":
             source_bytes, pdf_warnings = self._render_pdf_first_page(image_bytes)
             warnings.extend(pdf_warnings)
@@ -166,14 +227,21 @@ class OCRPipeline:
 
         if mode == "plain":
             prompt = self._build_plain_prompt(task=task, custom_prompt=custom_prompt)
+            resolved_schema_name = None
         elif mode == "structured":
-            if not schema_name:
-                raise ValueError("schema_name ist für den strukturierten Modus erforderlich")
             if custom_prompt and custom_prompt.strip():
                 raise ValueError("custom_prompt wird nur im Klartextmodus unterstützt")
             if task and task.strip() and task.strip() != PLAIN_TASK_OCR_TEXT:
                 raise ValueError("task wird nur im Klartextmodus unterstützt")
-            prompt = self._build_structured_prompt(schema_name)
+            resolved_schema_name = (schema_name or "").strip()
+            if not resolved_schema_name or resolved_schema_name == AUTO_SCHEMA_NAME:
+                resolved_schema_name = await self._auto_detect_schema(
+                    prepared_image=prepared_image,
+                    selected_model=selected_model,
+                    selected_token_limit=selected_token_limit,
+                )
+                warnings.append(f"Automatisch erkanntes Schema: {resolved_schema_name}")
+            prompt = self._build_structured_prompt(resolved_schema_name)
         else:
             raise ValueError(f"Nicht unterstützter Modus '{mode}'")
 
@@ -190,7 +258,7 @@ class OCRPipeline:
             text = raw_output.strip()
             structured = None
         else:
-            schema = SCHEMA_REGISTRY[schema_name or ""]
+            schema = SCHEMA_REGISTRY[resolved_schema_name or ""]
             parse_result = parse_structured_output(raw_output, list(schema["fields"].keys()))
             warnings.extend(parse_result.warnings)
             text = raw_output.strip()
@@ -201,7 +269,7 @@ class OCRPipeline:
             structured=structured,
             model=selected_model,
             mode=mode,
-            schema_name=schema_name,
+            schema_name=resolved_schema_name,
             latency_ms=latency_ms,
             warnings=warnings,
         )

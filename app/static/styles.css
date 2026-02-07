@@ -505,10 +505,65 @@ pre {
   gap: 0.38rem;
 }
 
+#table-preview-wrap {
+  display: grid;
+  gap: 0.38rem;
+}
+
+#table-preview-wrap h3,
 #structured-wrap h3 {
   color: var(--muted);
   font-size: 0.86rem;
   font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+#table-preview-body {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.table-preview-block {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: auto;
+  background: var(--pre-bg);
+}
+
+.table-preview-block table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.table-preview-block th,
+.table-preview-block td {
+  border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  padding: 0.45rem 0.55rem;
+  text-align: left;
+  vertical-align: top;
+  white-space: pre-wrap;
+}
+
+.table-preview-block th:last-child,
+.table-preview-block td:last-child {
+  border-right: 0;
+}
+
+.table-preview-block tr:last-child td {
+  border-bottom: 0;
+}
+
+.table-preview-block thead th {
+  background: color-mix(in srgb, var(--panel) 65%, var(--accent) 35%);
+  font-weight: 700;
+}
+
+.table-preview-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
   letter-spacing: 0.02em;
 }
 

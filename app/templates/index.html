@@ -82,6 +82,8 @@
                 <option value="plain">Klartext</option>
                 <option value="invoice_basic">Rechnung JSON</option>
                 <option value="receipt_basic">Beleg JSON</option>
+                <option value="table_basic">Tabelle JSON</option>
+                <option value="business_card_basic">Visitenkarte JSON</option>
                 <option value="structured">Strukturiertes JSON (benutzerdefiniertes Schema)</option>
               </select>
             </label>
@@ -92,6 +94,8 @@
                 <option value="ocr_text">OCR-Textextraktion</option>
                 <option value="describe_image">Bild beschreiben</option>
                 <option value="read_scene_text">Szenentext lesen</option>
+                <option value="extract_table_markdown">Tabelle</option>
+                <option value="summarize_document">Dokument zusammenfassen</option>
               </select>
             </label>
 
@@ -109,8 +113,11 @@
             <label id="schema-wrap" class="hidden">
               Schema (benutzerdefinierter strukturierter Modus)
               <select id="schema_name" name="schema_name">
+                <option value="auto" selected>auto (passendes Schema erkennen)</option>
                 <option value="invoice_basic">invoice_basic</option>
                 <option value="receipt_basic">receipt_basic</option>
+                <option value="table_basic">table_basic</option>
+                <option value="business_card_basic">business_card_basic</option>
               </select>
             </label>
 
@@ -126,6 +133,7 @@
                 name="token_limit"
                 type="number"
                 min="1"
+                max="128000"
                 step="1"
                 placeholder="{{ default_token_limit }}"
               />
@@ -151,10 +159,15 @@
           <div class="actions">
             <button id="copy-btn" type="button">Text kopieren</button>
             <button id="download-btn" type="button" class="hidden">JSON herunterladen</button>
+            <button id="download-csv-btn" type="button" class="hidden">CSV herunterladen</button>
           </div>
         </div>
         <div id="meta">Datei auswählen, um OCR zu starten.</div>
         <pre id="output"></pre>
+        <section id="table-preview-wrap" class="hidden">
+          <h3>Tabellenvorschau</h3>
+          <div id="table-preview-body"></div>
+        </section>
         <section id="structured-wrap" class="hidden">
           <h3>Strukturierte Nutzdaten</h3>
           <pre id="json-output"></pre>

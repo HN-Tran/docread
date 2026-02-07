@@ -20,4 +20,25 @@ SCHEMA_REGISTRY: dict[str, dict] = {
             "currency": "string",
         },
     },
+    "table_basic": {
+        "description": "Tabellenextraktion mit Kopfzeile und Zeilenwerten.",
+        "fields": {
+            "title": "string",
+            "columns": "array<string>",
+            "rows": "array<array<string>>",
+            "notes": "string",
+        },
+    },
+    "business_card_basic": {
+        "description": "Wichtige Felder einer Visitenkarte.",
+        "fields": {
+            "full_name": "string",
+            "role_title": "string",
+            "company": "string",
+            "email": "string",
+            "phone": "string",
+            "website": "string",
+            "address": "string",
+        },
+    },
 }

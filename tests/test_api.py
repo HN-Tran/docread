@@ -9,7 +9,7 @@ import pytest
 from fastapi import HTTPException, UploadFile
 from starlette.requests import Request
 
-from app.api.routes import health, ocr
+from app.api.routes import health, ocr, schemas
 from app.services.ocr_pipeline import OCRPipeline
 
 
@@ -92,6 +92,13 @@ def _pipeline() -> OCRPipeline:
 def test_health() -> None:
     payload = asyncio.run(health())
     assert payload["status"] == "ok"
+
+
+def test_schemas_contains_new_presets() -> None:
+    payload = asyncio.run(schemas())
+    schema_map = payload["schemas"]
+    assert "table_basic" in schema_map
+    assert "business_card_basic" in schema_map
 
 
 def test_ocr_rejects_bad_file_type() -> None:

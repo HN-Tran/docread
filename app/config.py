@@ -39,6 +39,8 @@ def get_settings() -> Settings:
     default_token_limit = _env_int("DEFAULT_TOKEN_LIMIT", 4096)
     if default_token_limit < 1:
         default_token_limit = 4096
+    if default_token_limit > 128000:
+        default_token_limit = 128000
 
     return Settings(
         app_name=os.getenv("APP_NAME", "OCR-Demo"),

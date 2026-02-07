@@ -21,10 +21,13 @@ const resultPanelEl = document.getElementById("result-panel");
 const globalDropOverlayEl = document.getElementById("global-drop-overlay");
 const outputEl = document.getElementById("output");
 const jsonOutputEl = document.getElementById("json-output");
+const tablePreviewWrapEl = document.getElementById("table-preview-wrap");
+const tablePreviewBodyEl = document.getElementById("table-preview-body");
 const structuredWrapEl = document.getElementById("structured-wrap");
 const metaEl = document.getElementById("meta");
 const copyBtn = document.getElementById("copy-btn");
 const downloadBtn = document.getElementById("download-btn");
+const downloadCsvBtn = document.getElementById("download-csv-btn");
 const themeLightBtn = document.getElementById("theme-light-btn");
 const themeDarkBtn = document.getElementById("theme-dark-btn");
 const loadingOverlayEl = document.getElementById("loading-overlay");
@@ -34,12 +37,19 @@ const previewPdfEl = document.getElementById("preview-pdf");
 const previewPdfLinkEl = document.getElementById("preview-pdf-link");
 
 let lastResponse = null;
+let lastTableMatrices = [];
 let previewUrl = null;
 let activeRequestController = null;
 let rerunTimer = null;
 let globalDragDepth = 0;
 const THEME_KEY = "ocr-demo-theme";
-const PRESET_STRUCTURED_MODES = new Set(["invoice_basic", "receipt_basic"]);
+const MAX_TOKEN_LIMIT = 128000;
+const PRESET_STRUCTURED_MODES = new Set([
+  "invoice_basic",
+  "receipt_basic",
+  "table_basic",
+  "business_card_basic",
+]);
 
 function isStructuredMode(modeValue) {
   return modeValue === "structured" || PRESET_STRUCTURED_MODES.has(modeValue);
@@ -87,10 +97,15 @@ function setLoading(isLoading) {
 
 function clearOutput() {
   outputEl.textContent = "";
+  outputEl.classList.remove("hidden");
   jsonOutputEl.innerHTML = "";
+  tablePreviewBodyEl.innerHTML = "";
+  tablePreviewWrapEl.classList.add("hidden");
   structuredWrapEl.classList.add("hidden");
   downloadBtn.classList.add("hidden");
+  downloadCsvBtn.classList.add("hidden");
   lastResponse = null;
+  lastTableMatrices = [];
 }
 
 function setWorkspaceVisible(isVisible) {
@@ -226,6 +241,9 @@ function buildPayload() {
     if (!Number.isInteger(tokenLimit) || tokenLimit < 1) {
       throw new Error("Token-Limit muss eine positive ganze Zahl sein.");
     }
+    if (tokenLimit > MAX_TOKEN_LIMIT) {
+      throw new Error(`Token-Limit darf ${MAX_TOKEN_LIMIT} nicht überschreiten.`);
+    }
     payload.set("token_limit", String(tokenLimit));
   } else {
     payload.delete("token_limit");
@@ -287,6 +305,226 @@ function highlightJson(value) {
   );
 }
 
+function csvCell(value) {
+  const raw = value === null || value === undefined ? "" : String(value);
+  return `"${raw.replaceAll('"', '""')}"`;
+}
+
+function matrixToCsv(matrix) {
+  if (!Array.isArray(matrix) || matrix.length === 0) {
+    return null;
+  }
+  const width = Math.max(...matrix.map((row) => row.length), 1);
+  const normalized = matrix.map((row) =>
+    Array.from({ length: width }, (_, idx) => String(row[idx] ?? ""))
+  );
+  const lines = normalized.map((row) => row.map(csvCell).join(","));
+  return `${lines.join("\n")}\n`;
+}
+
+function buildTableCsv(structured) {
+  return matrixToCsv(buildMatrixFromStructuredTable(structured));
+}
+
+function splitMarkdownRow(line) {
+  const trimmed = line.trim();
+  const withoutLeftPipe = trimmed.startsWith("|") ? trimmed.slice(1) : trimmed;
+  const withoutEdgePipes = withoutLeftPipe.endsWith("|")
+    ? withoutLeftPipe.slice(0, -1)
+    : withoutLeftPipe;
+  return withoutEdgePipes.split("|").map((cell) => cell.trim());
+}
+
+function isMarkdownSeparatorLine(line) {
+  const cells = splitMarkdownRow(line);
+  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.replaceAll(" ", "")));
+}
+
+function extractMarkdownTableMatrix(raw) {
+  const lines = raw.split(/\r?\n/);
+  for (let i = 0; i < lines.length - 1; i += 1) {
+    if (!lines[i].includes("|") || !lines[i + 1].includes("|")) {
+      continue;
+    }
+    if (!isMarkdownSeparatorLine(lines[i + 1])) {
+      continue;
+    }
+
+    const header = splitMarkdownRow(lines[i]);
+    const rows = [];
+    for (let j = i + 2; j < lines.length; j += 1) {
+      const rowLine = lines[j];
+      if (!rowLine.trim() || !rowLine.includes("|")) {
+        break;
+      }
+      if (isMarkdownSeparatorLine(rowLine)) {
+        continue;
+      }
+      rows.push(splitMarkdownRow(rowLine));
+    }
+
+    if (header.length === 0) {
+      continue;
+    }
+    const width = Math.max(header.length, ...rows.map((row) => row.length), 1);
+    const normalizedHeader = Array.from({ length: width }, (_, idx) => header[idx] ?? "");
+    const normalizedRows = rows.map((row) =>
+      Array.from({ length: width }, (_, idx) => row[idx] ?? "")
+    );
+    return [normalizedHeader, ...normalizedRows];
+  }
+  return null;
+}
+
+function extractHtmlTableMatrices(raw) {
+  if (!/<table[\s>]/i.test(raw)) {
+    return [];
+  }
+  const parser = new DOMParser();
+  const documentRoot = parser.parseFromString(raw, "text/html");
+  const tables = Array.from(documentRoot.querySelectorAll("table"));
+  const matrices = [];
+
+  for (const table of tables) {
+    const rows = Array.from(table.querySelectorAll("tr")).map((tr) =>
+      Array.from(tr.querySelectorAll("th,td")).map((cell) => {
+        const clone = cell.cloneNode(true);
+        if (clone && typeof clone.querySelectorAll === "function") {
+          clone.querySelectorAll("br").forEach((br) => {
+            br.replaceWith("\n");
+          });
+          return (clone.textContent || "")
+            .replace(/\r/g, "")
+            .replace(/[ \t]+\n/g, "\n")
+            .replace(/\n[ \t]+/g, "\n")
+            .trim();
+        }
+        return (cell.textContent || "").trim();
+      })
+    );
+    const nonEmptyRows = rows.filter((row) => row.some((cell) => cell.length > 0));
+    if (nonEmptyRows.length > 0) {
+      matrices.push(nonEmptyRows);
+    }
+  }
+  return matrices;
+}
+
+function buildMatrixFromStructuredTable(structured) {
+  if (!structured || typeof structured !== "object") {
+    return null;
+  }
+  const columns = Array.isArray(structured.columns) ? structured.columns : [];
+  const rows = Array.isArray(structured.rows) ? structured.rows : [];
+  if (columns.length === 0 && rows.length === 0) {
+    return null;
+  }
+
+  const width = Math.max(
+    columns.length,
+    ...rows.map((row) => (Array.isArray(row) ? row.length : 0)),
+    1
+  );
+  const header = (columns.length ? columns : Array.from({ length: width }, (_, i) => `col_${i + 1}`))
+    .slice(0, width)
+    .map((cell) => String(cell ?? ""));
+  const normalizedRows = rows.map((row) => {
+    const rowValues = Array.isArray(row) ? row : [];
+    return Array.from({ length: width }, (_, idx) => String(rowValues[idx] ?? ""));
+  });
+
+  return [header, ...normalizedRows];
+}
+
+function matrixToMarkdown(matrix) {
+  if (!Array.isArray(matrix) || matrix.length === 0) {
+    return "";
+  }
+  const width = Math.max(...matrix.map((row) => row.length), 1);
+  const normalized = matrix.map((row) =>
+    Array.from({ length: width }, (_, idx) => String(row[idx] ?? "").replaceAll("|", "\\|"))
+  );
+
+  const header = normalized[0];
+  const separator = Array.from({ length: width }, () => "---");
+  const lines = [
+    `| ${header.join(" | ")} |`,
+    `| ${separator.join(" | ")} |`,
+  ];
+  for (const row of normalized.slice(1)) {
+    lines.push(`| ${row.join(" | ")} |`);
+  }
+  return lines.join("\n");
+}
+
+function matricesToMarkdown(matrices) {
+  if (!Array.isArray(matrices) || matrices.length === 0) {
+    return "";
+  }
+  if (matrices.length === 1) {
+    return matrixToMarkdown(matrices[0]);
+  }
+  return matrices
+    .map((matrix, idx) => `Tabelle ${idx + 1}\n${matrixToMarkdown(matrix)}`)
+    .join("\n\n");
+}
+
+function renderTablePreview(matrices) {
+  if (!Array.isArray(matrices) || matrices.length === 0) {
+    tablePreviewBodyEl.innerHTML = "";
+    tablePreviewWrapEl.classList.add("hidden");
+    return;
+  }
+
+  tablePreviewBodyEl.innerHTML = "";
+  matrices.forEach((matrix, idx) => {
+    if (!Array.isArray(matrix) || matrix.length === 0) {
+      return;
+    }
+    if (matrices.length > 1) {
+      const label = document.createElement("p");
+      label.className = "table-preview-label";
+      label.textContent = `Tabelle ${idx + 1}`;
+      tablePreviewBodyEl.appendChild(label);
+    }
+
+    const block = document.createElement("div");
+    block.className = "table-preview-block";
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    const tbody = document.createElement("tbody");
+    const headerRow = document.createElement("tr");
+
+    const width = Math.max(...matrix.map((row) => row.length), 1);
+    const normalized = matrix.map((row) =>
+      Array.from({ length: width }, (_, cellIdx) => String(row[cellIdx] ?? ""))
+    );
+
+    normalized[0].forEach((value) => {
+      const th = document.createElement("th");
+      th.textContent = value;
+      headerRow.appendChild(th);
+    });
+    thead.appendChild(headerRow);
+
+    normalized.slice(1).forEach((row) => {
+      const tr = document.createElement("tr");
+      row.forEach((value) => {
+        const td = document.createElement("td");
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(thead);
+    table.appendChild(tbody);
+    block.appendChild(table);
+    tablePreviewBodyEl.appendChild(block);
+  });
+  tablePreviewWrapEl.classList.remove("hidden");
+}
+
 async function runOCR() {
   const selectedFile = currentFile();
   if (!selectedFile) {
@@ -312,9 +550,12 @@ async function runOCR() {
   metaEl.textContent = "OCR wird ausgeführt...";
 
   try {
+    const payload = buildPayload();
+    const requestMode = String(payload.get("mode") || "plain");
+    const requestTask = String(payload.get("task") || "");
     const response = await fetch("/api/ocr", {
       method: "POST",
-      body: buildPayload(),
+      body: payload,
       signal: controller.signal,
     });
     const data = await response.json();
@@ -323,10 +564,45 @@ async function runOCR() {
     }
 
     lastResponse = data;
-    outputEl.textContent = data.text || "(kein Inhalt)";
+    let displayText = data.text || "(kein Inhalt)";
+    let tableMatrices = [];
+
+    if (requestMode === "plain" && requestTask === "extract_table_markdown") {
+      const htmlTables = extractHtmlTableMatrices(displayText);
+      if (htmlTables.length > 0) {
+        tableMatrices = htmlTables;
+        displayText = matricesToMarkdown(htmlTables);
+      } else {
+        const markdownTable = extractMarkdownTableMatrix(displayText);
+        if (markdownTable) {
+          tableMatrices = [markdownTable];
+        }
+      }
+    }
+    if (data.mode === "structured" && data.schema_name === "table_basic") {
+      const structuredTable = buildMatrixFromStructuredTable(data.structured);
+      if (structuredTable) {
+        tableMatrices = [structuredTable];
+      }
+    }
+
     const showStructured = data.mode === "structured" && !!data.structured;
+    const showTableCsv = tableMatrices.length > 0;
+    if (showStructured) {
+      outputEl.textContent = "";
+      outputEl.classList.add("hidden");
+      tablePreviewBodyEl.innerHTML = "";
+      tablePreviewWrapEl.classList.add("hidden");
+      lastTableMatrices = [];
+    } else {
+      outputEl.classList.remove("hidden");
+      outputEl.textContent = displayText;
+      renderTablePreview(tableMatrices);
+      lastTableMatrices = tableMatrices;
+    }
     structuredWrapEl.classList.toggle("hidden", !showStructured);
     downloadBtn.classList.toggle("hidden", !showStructured);
+    downloadCsvBtn.classList.toggle("hidden", !showTableCsv);
     if (showStructured) {
       jsonOutputEl.innerHTML = highlightJson(data.structured);
     } else {
@@ -514,6 +790,31 @@ downloadBtn.addEventListener("click", () => {
   const link = document.createElement("a");
   link.href = url;
   link.download = "ocr-ergebnis.json";
+  link.click();
+  URL.revokeObjectURL(url);
+});
+
+downloadCsvBtn.addEventListener("click", () => {
+  if (lastTableMatrices.length > 0) {
+    const csv = matrixToCsv(lastTableMatrices[0]);
+    if (!csv) return;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "ocr-tabelle.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+    return;
+  }
+  if (!lastResponse || lastResponse.schema_name !== "table_basic") return;
+  const csv = buildTableCsv(lastResponse.structured);
+  if (!csv) return;
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "ocr-tabelle.csv";
   link.click();
   URL.revokeObjectURL(url);
 });

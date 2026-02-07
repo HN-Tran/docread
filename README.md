@@ -7,7 +7,7 @@ Minimales OCR-Demo mit Ollama-Vision-Modell über ein FastAPI-Backend, inklusive
 - `POST /api/ocr` für Klartext- oder strukturierte Extraktion
 - `GET /api/models` zum Auflisten verfügbarer Ollama-Modelle
 - `GET /api/schemas` zum Anzeigen unterstützter strukturierter Schemata
-- Browser-UI unter `/` mit zentrierter Startkarte, Drag-and-Drop-Upload, Auto-Run bei Dateiauswahl, Expertenoptionen, schnellen Rechnungs-/Beleg-Vorgaben, Hell/Dunkel-Modus, Bild/PDF-Vorschau und JSON-Highlighting
+- Browser-UI unter `/` mit zentrierter Startkarte, Drag-and-Drop-Upload, Auto-Run bei Dateiauswahl, Expertenoptionen, schnellen JSON-Vorgaben (Rechnung, Beleg, Tabelle, Visitenkarte), Hell/Dunkel-Modus, Bild/PDF-Vorschau, JSON-Highlighting und CSV-Download für Tabellen
 - Evaluations-Runner mit CER/WER und Feldgenauigkeit
 
 ## Anforderungen
@@ -49,9 +49,17 @@ uv run uvicorn app.main:app --reload
 - `mode`: `plain` oder `structured`
 - `schema_name`: erforderlich bei `mode=structured`
 - `model`: optionale Modell-Überschreibung
-- `token_limit`: optionale Token-/Kontextgrenze, wird als Ollama-`num_ctx` gesetzt
-- `task`: Klartext-Aufgabenpreset (`ocr_text`, `describe_image`, `read_scene_text`)
+- `token_limit`: optionale Token-/Kontextgrenze (`1..128000`), wird als Ollama-`num_ctx` gesetzt
+- `task`: Klartext-Aufgabenpreset (`ocr_text`, `describe_image`, `read_scene_text`, `extract_table_markdown`, `summarize_document`)
 - `custom_prompt`: optionaler Klartext-Prompt, hat Vorrang vor `task`
+
+Beispiele für `schema_name`:
+
+- `auto` (Schema wird automatisch erkannt)
+- `invoice_basic`
+- `receipt_basic`
+- `table_basic`
+- `business_card_basic`
 
 Hinweis: Bei PDF-Dateien wird aktuell die erste Seite verarbeitet.
 

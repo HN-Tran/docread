@@ -20,19 +20,24 @@ def _png_bytes() -> bytes:
 
 
 class FakeOllamaClient:
-    def __init__(self) -> None:
+    def __init__(self, responses: list[str] | None = None) -> None:
         self.last_prompt = ""
+        self.prompts: list[str] = []
         self.last_model = ""
         self.last_num_ctx: int | None = None
         self.last_image_bytes = b""
+        self.responses = list(responses) if responses is not None else []
 
     async def run_ocr(
         self, *, image_bytes: bytes, prompt: str, model: str, num_ctx: int | None = None
     ) -> str:
         self.last_image_bytes = image_bytes
         self.last_prompt = prompt
+        self.prompts.append(prompt)
         self.last_model = model
         self.last_num_ctx = num_ctx
+        if self.responses:
+            return self.responses.pop(0)
         return "ok"
 
 
@@ -98,6 +103,38 @@ def test_plain_unknown_task_raises() -> None:
     assert "Unbekannte Aufgabe" in str(exc_info.value)
 
 
+def test_plain_extract_table_markdown_task_uses_table_prompt() -> None:
+    fake_client = FakeOllamaClient()
+    pipeline = _pipeline(fake_client)
+    asyncio.run(
+        pipeline.run(
+            image_bytes=_png_bytes(),
+            mode="plain",
+            schema_name=None,
+            task="extract_table_markdown",
+            custom_prompt=None,
+        )
+    )
+    assert "Markdown" in fake_client.last_prompt
+    assert "Keine Tabelle erkannt." in fake_client.last_prompt
+
+
+def test_plain_summarize_document_task_uses_summary_prompt() -> None:
+    fake_client = FakeOllamaClient()
+    pipeline = _pipeline(fake_client)
+    asyncio.run(
+        pipeline.run(
+            image_bytes=_png_bytes(),
+            mode="plain",
+            schema_name=None,
+            task="summarize_document",
+            custom_prompt=None,
+        )
+    )
+    assert "Zusammenfassung" in fake_client.last_prompt
+    assert "Stichpunkte" in fake_client.last_prompt
+
+
 def test_structured_rejects_custom_prompt() -> None:
     fake_client = FakeOllamaClient()
     pipeline = _pipeline(fake_client)
@@ -112,6 +149,45 @@ def test_structured_rejects_custom_prompt() -> None:
             )
         )
     assert "custom_prompt wird nur im Klartextmodus unterstützt" in str(exc_info.value)
+
+
+def test_structured_auto_schema_detects_table_basic() -> None:
+    fake_client = FakeOllamaClient(
+        responses=[
+            "table_basic",
+            (
+                '{"title":"Preisliste","columns":["Artikel","Preis"],'
+                '"rows":[["A","10.00"]],"notes":null}'
+            ),
+        ]
+    )
+    pipeline = _pipeline(fake_client)
+    result = asyncio.run(
+        pipeline.run(
+            image_bytes=_png_bytes(),
+            mode="structured",
+            schema_name="auto",
+        )
+    )
+    assert result.schema_name == "table_basic"
+    assert result.structured is not None
+    assert result.structured["title"] == "Preisliste"
+    assert any("Automatisch erkanntes Schema: table_basic" in w for w in result.warnings)
+    assert "Verfügbare schema_name" in fake_client.prompts[0]
+
+
+def test_structured_auto_schema_unknown_raises() -> None:
+    fake_client = FakeOllamaClient(responses=["something_else"])
+    pipeline = _pipeline(fake_client)
+    with pytest.raises(ValueError) as exc_info:
+        asyncio.run(
+            pipeline.run(
+                image_bytes=_png_bytes(),
+                mode="structured",
+                schema_name=None,
+            )
+        )
+    assert "Schema konnte nicht automatisch erkannt werden" in str(exc_info.value)
 
 
 def test_default_token_limit_is_forwarded() -> None:
@@ -155,6 +231,21 @@ def test_token_limit_must_be_positive() -> None:
             )
         )
     assert "token_limit muss eine positive ganze Zahl sein" in str(exc_info.value)
+
+
+def test_token_limit_must_not_exceed_max() -> None:
+    fake_client = FakeOllamaClient()
+    pipeline = _pipeline(fake_client)
+    with pytest.raises(ValueError) as exc_info:
+        asyncio.run(
+            pipeline.run(
+                image_bytes=_png_bytes(),
+                mode="plain",
+                schema_name=None,
+                token_limit=128001,
+            )
+        )
+    assert "token_limit darf 128000 nicht überschreiten" in str(exc_info.value)
 
 
 def test_pdf_input_is_rendered_to_png_before_ollama_call() -> None:
