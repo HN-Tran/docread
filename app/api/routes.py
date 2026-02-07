@@ -31,6 +31,7 @@ async def health() -> dict:
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "ollama_base_url": settings.ollama_base_url,
         "default_model": settings.ollama_model,
+        "default_token_limit": settings.default_token_limit,
     }
 
 
@@ -59,6 +60,7 @@ async def ocr(
     model: str | None = Form(None),
     task: str | None = Form(None),
     custom_prompt: str | None = Form(None),
+    token_limit: int | None = Form(None),
     pipeline: OCRPipeline = Depends(get_ocr_pipeline),
 ) -> dict:
     settings = get_settings()
@@ -88,6 +90,7 @@ async def ocr(
             model=model,
             task=task,
             custom_prompt=custom_prompt,
+            token_limit=token_limit,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

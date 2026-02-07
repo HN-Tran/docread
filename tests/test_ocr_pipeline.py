@@ -21,10 +21,14 @@ class FakeOllamaClient:
     def __init__(self) -> None:
         self.last_prompt = ""
         self.last_model = ""
+        self.last_num_ctx: int | None = None
 
-    async def run_ocr(self, *, image_bytes: bytes, prompt: str, model: str) -> str:
+    async def run_ocr(
+        self, *, image_bytes: bytes, prompt: str, model: str, num_ctx: int | None = None
+    ) -> str:
         self.last_prompt = prompt
         self.last_model = model
+        self.last_num_ctx = num_ctx
         return "ok"
 
 
@@ -32,6 +36,7 @@ def _pipeline(fake_client: FakeOllamaClient) -> OCRPipeline:
     return OCRPipeline(
         ollama_client=cast(OllamaClient, fake_client),
         default_model="glm-ocr:latest",
+        default_token_limit=4096,
         max_image_dim=2048,
     )
 
@@ -96,3 +101,46 @@ def test_structured_rejects_custom_prompt() -> None:
             )
         )
     assert "custom_prompt is only supported for plain mode" in str(exc_info.value)
+
+
+def test_default_token_limit_is_forwarded() -> None:
+    fake_client = FakeOllamaClient()
+    pipeline = _pipeline(fake_client)
+    asyncio.run(
+        pipeline.run(
+            image_bytes=_png_bytes(),
+            mode="plain",
+            schema_name=None,
+            token_limit=None,
+        )
+    )
+    assert fake_client.last_num_ctx == 4096
+
+
+def test_token_limit_override_is_forwarded() -> None:
+    fake_client = FakeOllamaClient()
+    pipeline = _pipeline(fake_client)
+    asyncio.run(
+        pipeline.run(
+            image_bytes=_png_bytes(),
+            mode="plain",
+            schema_name=None,
+            token_limit=8192,
+        )
+    )
+    assert fake_client.last_num_ctx == 8192
+
+
+def test_token_limit_must_be_positive() -> None:
+    fake_client = FakeOllamaClient()
+    pipeline = _pipeline(fake_client)
+    with pytest.raises(ValueError) as exc_info:
+        asyncio.run(
+            pipeline.run(
+                image_bytes=_png_bytes(),
+                mode="plain",
+                schema_name=None,
+                token_limit=0,
+            )
+        )
+    assert "token_limit must be a positive integer" in str(exc_info.value)

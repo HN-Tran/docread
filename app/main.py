@@ -29,6 +29,7 @@ def create_app() -> FastAPI:
     ocr_pipeline = OCRPipeline(
         ollama_client=ollama_client,
         default_model=settings.ollama_model,
+        default_token_limit=settings.default_token_limit,
         max_image_dim=settings.max_image_dim,
     )
     app.state.ollama_client = ollama_client
@@ -48,6 +49,7 @@ def create_app() -> FastAPI:
             name="index.html",
             context={
                 "default_model": settings.ollama_model,
+                "default_token_limit": settings.default_token_limit,
             },
         )
 

@@ -7,7 +7,7 @@ Minimal OCR demo that uses an Ollama vision model from a FastAPI backend, with a
 - `POST /api/ocr` for plain or structured extraction
 - `GET /api/models` to list available Ollama models
 - `GET /api/schemas` to inspect supported structured schemas
-- Browser UI at `/` with dark mode, image/PDF preview, JSON highlighting, and prompt controls
+- Browser UI at `/` with centered onboarding card, drag/drop upload, auto-run on file select, advanced options toggle, quick invoice/receipt presets, dark mode, image/PDF preview, and JSON highlighting
 - Evaluation runner with CER/WER and field accuracy metrics
 
 ## Requirements
@@ -28,6 +28,7 @@ Optional environment variables:
 ```bash
 export OLLAMA_BASE_URL="http://localhost:11434"
 export OLLAMA_MODEL="glm-ocr:latest"
+export DEFAULT_TOKEN_LIMIT="4096"
 export MAX_UPLOAD_BYTES="8388608"
 export MAX_IMAGE_DIM="2048"
 ```
@@ -48,6 +49,7 @@ Open: `http://127.0.0.1:8000`
 - `mode`: `plain` or `structured`
 - `schema_name`: required when mode is `structured`
 - `model`: optional model override
+- `token_limit`: optional token/context limit override passed as Ollama `num_ctx`
 - `task`: plain-mode task preset (`ocr_text`, `describe_image`, `read_scene_text`)
 - `custom_prompt`: optional plain-mode override prompt (takes precedence over `task`)
 
@@ -125,6 +127,7 @@ GPU notes:
 - Compose is configured to request NVIDIA GPUs for the `ollama` service.
 - Requires NVIDIA driver + NVIDIA Container Toolkit installed on the host.
 - Optional overrides:
+  - `DEFAULT_TOKEN_LIMIT` (default: `4096`)
   - `OLLAMA_GPU_DEVICES` (default: `all`)
   - `NVIDIA_VISIBLE_DEVICES` (default: `all`)
   - `NVIDIA_DRIVER_CAPABILITIES` (default: `compute,utility`)

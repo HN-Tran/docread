@@ -32,15 +32,19 @@ class OllamaClient:
         image_bytes: bytes,
         prompt: str,
         model: str,
+        num_ctx: int | None = None,
     ) -> str:
         url = f"{self.base_url}/api/chat"
         encoded = base64.b64encode(image_bytes).decode("ascii")
+        options: dict[str, int] = {
+            "temperature": 0,
+        }
+        if num_ctx is not None:
+            options["num_ctx"] = num_ctx
         request_payload = {
             "model": model,
             "stream": False,
-            "options": {
-                "temperature": 0,
-            },
+            "options": options,
             "messages": [
                 {
                     "role": "user",

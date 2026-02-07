@@ -55,6 +55,7 @@ class FakePipeline:
         model: str | None,
         task: str | None,
         custom_prompt: str | None,
+        token_limit: int | None,
     ) -> Any:
         self.last_call = {
             "image_bytes": image_bytes,
@@ -63,6 +64,7 @@ class FakePipeline:
             "model": model,
             "task": task,
             "custom_prompt": custom_prompt,
+            "token_limit": token_limit,
         }
         if mode == "structured" and not schema_name:
             raise ValueError("schema_name is required for structured mode")
@@ -101,6 +103,7 @@ def test_ocr_rejects_bad_file_type() -> None:
                 model=None,
                 task=None,
                 custom_prompt=None,
+                token_limit=None,
                 pipeline=_pipeline(),
             )
         )
@@ -118,6 +121,7 @@ def test_ocr_plain() -> None:
             model=None,
             task=None,
             custom_prompt=None,
+            token_limit=None,
             pipeline=_pipeline(),
         )
     )
@@ -136,6 +140,7 @@ def test_ocr_structured_requires_schema() -> None:
                 model=None,
                 task=None,
                 custom_prompt=None,
+                token_limit=None,
                 pipeline=_pipeline(),
             )
         )
@@ -153,6 +158,7 @@ def test_ocr_structured_with_schema() -> None:
             model=None,
             task=None,
             custom_prompt=None,
+            token_limit=None,
             pipeline=_pipeline(),
         )
     )
@@ -170,9 +176,11 @@ def test_ocr_plain_forwards_task_and_custom_prompt() -> None:
             model="llava:latest",
             task="describe_image",
             custom_prompt="Describe this image.",
+            token_limit=8192,
             pipeline=cast(OCRPipeline, fake_pipeline),
         )
     )
     assert response["model"] == "llava:latest"
     assert fake_pipeline.last_call["task"] == "describe_image"
     assert fake_pipeline.last_call["custom_prompt"] == "Describe this image."
+    assert fake_pipeline.last_call["token_limit"] == 8192

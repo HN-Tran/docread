@@ -39,10 +39,14 @@ class OCRPipeline:
         *,
         ollama_client: OllamaClient,
         default_model: str,
+        default_token_limit: int,
         max_image_dim: int,
     ) -> None:
+        if default_token_limit < 1:
+            raise ValueError("default_token_limit must be a positive integer")
         self.ollama_client = ollama_client
         self.default_model = default_model
+        self.default_token_limit = default_token_limit
         self.max_image_dim = max_image_dim
         prompts_dir = Path(__file__).resolve().parents[1] / "prompts"
         self.plain_prompt_template = (prompts_dir / "plain_ocr.txt").read_text(encoding="utf-8")
@@ -109,9 +113,13 @@ class OCRPipeline:
         model: str | None = None,
         task: str | None = None,
         custom_prompt: str | None = None,
+        token_limit: int | None = None,
     ) -> OCRResult:
         warnings: list[str] = []
         selected_model = model or self.default_model
+        selected_token_limit = self.default_token_limit if token_limit is None else token_limit
+        if selected_token_limit < 1:
+            raise ValueError("token_limit must be a positive integer")
         prepared_image, preprocess_warnings = self._preprocess(image_bytes)
         warnings.extend(preprocess_warnings)
 
@@ -133,6 +141,7 @@ class OCRPipeline:
             image_bytes=prepared_image,
             prompt=prompt,
             model=selected_model,
+            num_ctx=selected_token_limit,
         )
         latency_ms = int((time.perf_counter() - start) * 1000)
 

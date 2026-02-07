@@ -72,6 +72,7 @@ async def run_eval(manifest: Path, samples_dir: Path, reports_dir: Path) -> Path
             timeout_s=settings.request_timeout_s,
         ),
         default_model=settings.ollama_model,
+        default_token_limit=settings.default_token_limit,
         max_image_dim=settings.max_image_dim,
     )
     samples = _load_manifest(manifest)
