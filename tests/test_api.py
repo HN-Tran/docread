@@ -9,7 +9,7 @@ import pytest
 from fastapi import HTTPException, UploadFile
 from starlette.requests import Request
 
-from app.api.routes import health, ocr, schemas
+from app.api.routes import health, ocr, router, schemas
 from app.services.ocr_pipeline import OCRPipeline
 
 
@@ -212,3 +212,11 @@ def test_ocr_accepts_pdf_content_type() -> None:
     )
     assert response["text"] == "hello world"
     assert fake_pipeline.last_call["content_type"] == "application/pdf"
+
+
+def test_api_v1_alias_routes_exist() -> None:
+    route_paths = {route.path for route in router.routes}
+    assert "/api/v1/health" in route_paths
+    assert "/api/v1/models" in route_paths
+    assert "/api/v1/schemas" in route_paths
+    assert "/api/v1/ocr" in route_paths

@@ -116,3 +116,10 @@ async def ocr(
         "latency_ms": result.latency_ms,
         "warnings": result.warnings,
     }
+
+
+# Backward-compatible alias paths for external clients.
+router.add_api_route("/v1/health", health, methods=["GET"], include_in_schema=False)
+router.add_api_route("/v1/models", models, methods=["GET"], include_in_schema=False)
+router.add_api_route("/v1/schemas", schemas, methods=["GET"], include_in_schema=False)
+router.add_api_route("/v1/ocr", ocr, methods=["POST"], include_in_schema=False)
