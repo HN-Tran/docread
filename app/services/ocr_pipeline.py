@@ -352,6 +352,10 @@ class OCRPipeline:
             "plain text only",
             "antworte auf deutsch",
             "answer in german",
+            "das bild nicht beschreiben",
+            "wenn kein text sichtbar ist",
+            "gib exakt aus",
+            "exactly ausgeben",
         )
         if any(fragment in output_norm for fragment in instruction_fragments):
             return True
