@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 
 from app.config import get_settings
 from app.schemas import SCHEMA_REGISTRY
-from app.services.ocr_pipeline import OCRPipeline
+from app.services.backend_router import OCRBackendRouter
 from app.services.ollama_client import OllamaClient, OllamaError
 
 router = APIRouter(prefix="/api")
@@ -24,8 +24,8 @@ ALLOWED_MIME_TYPES = {
 }
 
 
-def get_ocr_pipeline(request: Request) -> OCRPipeline:
-    return cast(OCRPipeline, request.app.state.ocr_pipeline)
+def get_ocr_backend_router(request: Request) -> OCRBackendRouter:
+    return cast(OCRBackendRouter, request.app.state.ocr_backend_router)
 
 
 def get_ollama_client(request: Request) -> OllamaClient:
@@ -40,6 +40,7 @@ async def health() -> dict:
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "ollama_base_url": settings.ollama_base_url,
         "default_model": settings.ollama_model,
+        "default_backend": settings.ocr_backend,
         "default_token_limit": settings.default_token_limit,
     }
 
@@ -71,7 +72,9 @@ async def ocr(
     custom_prompt: str | None = Form(None),
     token_limit: int | None = Form(None),
     gif_max_frames: int | None = Form(None),
-    pipeline: OCRPipeline = Depends(get_ocr_pipeline),
+    expert_enable_layout: bool | None = Form(None),
+    backend: str | None = Form(None),
+    pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
 ) -> dict:
     settings = get_settings()
     if file.content_type not in ALLOWED_MIME_TYPES:
@@ -93,7 +96,8 @@ async def ocr(
         )
 
     try:
-        result = await pipeline.run(
+        result, selected_backend = await pipeline.run(
+            backend=backend,
             image_bytes=image_bytes,
             content_type=file.content_type,
             mode=mode,
@@ -103,6 +107,7 @@ async def ocr(
             custom_prompt=custom_prompt,
             token_limit=token_limit,
             gif_max_frames=gif_max_frames,
+            expert_enable_layout=expert_enable_layout,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -124,6 +129,7 @@ async def ocr(
         "model": result.model,
         "mode": result.mode,
         "schema_name": result.schema_name,
+        "backend": selected_backend,
         "latency_ms": result.latency_ms,
         "warnings": result.warnings,
     }

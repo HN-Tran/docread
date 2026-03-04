@@ -5,6 +5,8 @@ const modeEl = document.getElementById("mode");
 const taskEl = document.getElementById("task");
 const customPromptEl = document.getElementById("custom_prompt");
 const schemaNameEl = document.getElementById("schema_name");
+const backendEl = document.getElementById("backend");
+const expertEnableLayoutEl = document.getElementById("expert_enable_layout");
 const modelEl = document.getElementById("model");
 const tokenLimitEl = document.getElementById("token_limit");
 const gifMaxFramesEl = document.getElementById("gif_max_frames");
@@ -267,6 +269,18 @@ function buildPayload() {
     }
     payload.delete("task");
     payload.delete("custom_prompt");
+  }
+  const backendValue = String(payload.get("backend") || "").trim();
+  if (backendValue) {
+    payload.set("backend", backendValue);
+  } else {
+    payload.delete("backend");
+  }
+  const expertLayoutValue = String(payload.get("expert_enable_layout") || "").trim();
+  if (expertLayoutValue === "true" || expertLayoutValue === "false") {
+    payload.set("expert_enable_layout", expertLayoutValue);
+  } else {
+    payload.delete("expert_enable_layout");
   }
   if (!payload.get("model")) {
     payload.delete("model");
@@ -608,7 +622,8 @@ async function runOCR() {
     }
 
     const warnings = (data.warnings || []).join(" | ");
-    metaEl.textContent = `Modell: ${data.model} | Latenz: ${data.latency_ms} ms${warnings ? ` | Hinweise: ${warnings}` : ""}`;
+    const backend = data.backend || String(payload.get("backend") || "direct");
+    metaEl.textContent = `Backend: ${backend} | Modell: ${data.model} | Latenz: ${data.latency_ms} ms${warnings ? ` | Hinweise: ${warnings}` : ""}`;
   } catch (error) {
     if (error.name === "AbortError") {
       return;
@@ -745,6 +760,12 @@ taskEl.addEventListener("change", () => {
   setAdvancedDirty(true);
 });
 schemaNameEl.addEventListener("change", () => {
+  setAdvancedDirty(true);
+});
+backendEl.addEventListener("change", () => {
+  setAdvancedDirty(true);
+});
+expertEnableLayoutEl.addEventListener("change", () => {
   setAdvancedDirty(true);
 });
 modelEl.addEventListener("input", () => {

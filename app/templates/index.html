@@ -120,6 +120,35 @@
             </label>
 
             <label>
+              Modus
+              <select id="backend" name="backend">
+                <option value="direct" {% if default_backend != "expert" %}selected{% endif %}>
+                  Direct
+                </option>
+                <option value="expert" {% if default_backend == "expert" %}selected{% endif %}>
+                  Dev (GLM-OCR)
+                </option>
+              </select>
+              <span class="hint">
+                Dev nutzt GLM-OCR Layout-Pipeline (mit Ollama als OCR-Endpunkt), Direct nutzt den bestehenden Pfad.
+              </span>
+            </label>
+
+            <label>
+              Dev: Layout
+              <select id="expert_enable_layout" name="expert_enable_layout">
+                <option value="" selected>
+                  Standard ({{ "An" if default_expert_enable_layout else "Aus" }})
+                </option>
+                <option value="true">An</option>
+                <option value="false">Aus</option>
+              </select>
+              <span class="hint">
+                Überschreibt pro Anfrage das GLM-OCR Layout-Flag (nur bei Modus Dev relevant).
+              </span>
+            </label>
+
+            <label>
               Modell
               <input id="model" name="model" placeholder="{{ default_model }}" />
             </label>

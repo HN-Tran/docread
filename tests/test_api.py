@@ -10,7 +10,7 @@ from fastapi import HTTPException, UploadFile
 from starlette.requests import Request
 
 from app.api.routes import health, ocr, router, schemas
-from app.services.ocr_pipeline import OCRPipeline
+from app.services.backend_router import OCRBackendRouter
 
 
 def _png_bytes() -> bytes:
@@ -42,13 +42,15 @@ def _request() -> Request:
     )
 
 
-class FakePipeline:
+class FakeBackendRouter:
     def __init__(self) -> None:
         self.last_call: dict[str, Any] = {}
+        self.default_backend = "direct"
 
     async def run(
         self,
         *,
+        backend: str | None,
         image_bytes: bytes,
         content_type: str | None,
         mode: str,
@@ -58,8 +60,11 @@ class FakePipeline:
         custom_prompt: str | None,
         token_limit: int | None,
         gif_max_frames: int | None,
+        expert_enable_layout: bool | None,
     ) -> Any:
+        selected_backend = backend or self.default_backend
         self.last_call = {
+            "backend": selected_backend,
             "image_bytes": image_bytes,
             "content_type": content_type,
             "mode": mode,
@@ -69,10 +74,11 @@ class FakePipeline:
             "custom_prompt": custom_prompt,
             "token_limit": token_limit,
             "gif_max_frames": gif_max_frames,
+            "expert_enable_layout": expert_enable_layout,
         }
         if mode == "structured" and not schema_name:
             raise ValueError("schema_name ist für den strukturierten Modus erforderlich")
-        return type(
+        result = type(
             "OCRResult",
             (),
             {
@@ -85,10 +91,11 @@ class FakePipeline:
                 "warnings": [],
             },
         )()
+        return result, selected_backend
 
 
-def _pipeline() -> OCRPipeline:
-    return cast(OCRPipeline, FakePipeline())
+def _pipeline() -> OCRBackendRouter:
+    return cast(OCRBackendRouter, FakeBackendRouter())
 
 
 def test_health() -> None:
@@ -177,7 +184,7 @@ def test_ocr_structured_with_schema() -> None:
 
 
 def test_ocr_plain_forwards_task_and_custom_prompt() -> None:
-    fake_pipeline = FakePipeline()
+    fake_pipeline = FakeBackendRouter()
     response = asyncio.run(
         ocr(
             request=_request(),
@@ -188,7 +195,7 @@ def test_ocr_plain_forwards_task_and_custom_prompt() -> None:
             task="describe_image",
             custom_prompt="Beschreibe dieses Bild.",
             token_limit=8192,
-            pipeline=cast(OCRPipeline, fake_pipeline),
+            pipeline=cast(OCRBackendRouter, fake_pipeline),
         )
     )
     assert response["model"] == "llava:latest"
@@ -198,7 +205,7 @@ def test_ocr_plain_forwards_task_and_custom_prompt() -> None:
 
 
 def test_ocr_accepts_pdf_content_type() -> None:
-    fake_pipeline = FakePipeline()
+    fake_pipeline = FakeBackendRouter()
     response = asyncio.run(
         ocr(
             request=_request(),
@@ -209,7 +216,7 @@ def test_ocr_accepts_pdf_content_type() -> None:
             task=None,
             custom_prompt=None,
             token_limit=None,
-            pipeline=cast(OCRPipeline, fake_pipeline),
+            pipeline=cast(OCRBackendRouter, fake_pipeline),
         )
     )
     assert response["text"] == "hello world"
@@ -218,7 +225,7 @@ def test_ocr_accepts_pdf_content_type() -> None:
 
 @pytest.mark.parametrize("content_type", ["image/tif", "image/tiff", "image/x-tiff"])
 def test_ocr_accepts_tiff_content_type(content_type: str) -> None:
-    fake_pipeline = FakePipeline()
+    fake_pipeline = FakeBackendRouter()
     response = asyncio.run(
         ocr(
             request=_request(),
@@ -229,7 +236,7 @@ def test_ocr_accepts_tiff_content_type(content_type: str) -> None:
             task=None,
             custom_prompt=None,
             token_limit=None,
-            pipeline=cast(OCRPipeline, fake_pipeline),
+            pipeline=cast(OCRBackendRouter, fake_pipeline),
         )
     )
     assert response["text"] == "hello world"
@@ -237,7 +244,7 @@ def test_ocr_accepts_tiff_content_type(content_type: str) -> None:
 
 
 def test_ocr_accepts_gif_content_type() -> None:
-    fake_pipeline = FakePipeline()
+    fake_pipeline = FakeBackendRouter()
     response = asyncio.run(
         ocr(
             request=_request(),
@@ -248,7 +255,7 @@ def test_ocr_accepts_gif_content_type() -> None:
             task=None,
             custom_prompt=None,
             token_limit=None,
-            pipeline=cast(OCRPipeline, fake_pipeline),
+            pipeline=cast(OCRBackendRouter, fake_pipeline),
         )
     )
     assert response["text"] == "hello world"
@@ -256,7 +263,7 @@ def test_ocr_accepts_gif_content_type() -> None:
 
 
 def test_ocr_forwards_gif_max_frames() -> None:
-    fake_pipeline = FakePipeline()
+    fake_pipeline = FakeBackendRouter()
     asyncio.run(
         ocr(
             request=_request(),
@@ -268,10 +275,50 @@ def test_ocr_forwards_gif_max_frames() -> None:
             custom_prompt=None,
             token_limit=None,
             gif_max_frames=5,
-            pipeline=cast(OCRPipeline, fake_pipeline),
+            pipeline=cast(OCRBackendRouter, fake_pipeline),
         )
     )
     assert fake_pipeline.last_call["gif_max_frames"] == 5
+
+
+def test_ocr_forwards_backend_choice() -> None:
+    fake_pipeline = FakeBackendRouter()
+    response = asyncio.run(
+        ocr(
+            request=_request(),
+            file=_upload_file(content=_png_bytes(), content_type="image/png"),
+            mode="plain",
+            schema_name=None,
+            model=None,
+            task=None,
+            custom_prompt=None,
+            token_limit=None,
+            backend="expert",
+            pipeline=cast(OCRBackendRouter, fake_pipeline),
+        )
+    )
+    assert fake_pipeline.last_call["backend"] == "expert"
+    assert response["backend"] == "expert"
+
+
+def test_ocr_forwards_expert_enable_layout() -> None:
+    fake_pipeline = FakeBackendRouter()
+    asyncio.run(
+        ocr(
+            request=_request(),
+            file=_upload_file(content=_png_bytes(), content_type="image/png"),
+            mode="plain",
+            schema_name=None,
+            model=None,
+            task=None,
+            custom_prompt=None,
+            token_limit=None,
+            backend="expert",
+            expert_enable_layout=False,
+            pipeline=cast(OCRBackendRouter, fake_pipeline),
+        )
+    )
+    assert fake_pipeline.last_call["expert_enable_layout"] is False
 
 
 def test_api_v1_alias_routes_exist() -> None:

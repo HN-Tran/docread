@@ -28,7 +28,12 @@ Optionale Umgebungsvariablen:
 ```bash
 export OLLAMA_BASE_URL="http://localhost:11434"
 export OLLAMA_MODEL="glm-ocr:latest"
-export DEFAULT_TOKEN_LIMIT="4096"
+export OCR_BACKEND="direct" # direct | expert
+export OCR_EXPERT_MODE="selfhosted"
+export OCR_EXPERT_ENABLE_LAYOUT="true"
+export OCR_EXPERT_OCR_API_HOST="localhost"
+export OCR_EXPERT_OCR_API_PORT="11434"
+export DEFAULT_TOKEN_LIMIT="16384"
 export MAX_UPLOAD_BYTES="8388608"
 export MAX_IMAGE_DIM="2048"
 ```
@@ -48,9 +53,11 @@ uv run uvicorn app.main:app --reload
 - `file`: Bild oder PDF (`image/png`, `image/jpeg`, `image/webp`, `image/gif`, `image/tif`, `image/tiff`, `image/x-tiff`, `application/pdf`)
 - `mode`: `plain` oder `structured`
 - `schema_name`: erforderlich bei `mode=structured`
+- `backend`: optional `direct` oder `expert` (UI: Direct/Dev, Standard aus `OCR_BACKEND`)
 - `model`: optionale Modell-Überschreibung
 - `token_limit`: optionale Token-/Kontextgrenze (`1..128000`), wird als Ollama-`num_ctx` gesetzt
 - `gif_max_frames`: optionales Frame-Limit für animierte GIFs (`1..32`, Standard: `8`)
+- `expert_enable_layout`: optionales Layout-Override für `backend=expert` (`true|false`)
 - `task`: Klartext-Aufgabenpreset (`ocr_text`, `describe_image`, `read_scene_text`, `extract_table_markdown`, `summarize_document`)
 - `custom_prompt`: optionaler Klartext-Prompt, hat Vorrang vor `task`
 
@@ -65,6 +72,8 @@ Beispiele für `schema_name`:
 Hinweis: Bei PDF-Dateien werden alle Seiten verarbeitet.
 Hinweis: Animierte GIFs werden als Mehrseiten-Eingabe behandelt; bis zu 8 Frames werden gleichmäßig gesampelt verarbeitet.
 Hinweis: Für `task=describe_image` bei animierten GIFs wird effizient ein Storyboard aus Sample-Frames in einem Einzelaufruf beschrieben.
+Hinweis: `backend=expert` nutzt GLM-OCR primär für `mode=plain` + `task=ocr_text`; für andere Aufgaben fällt die App auf den Direct-Pfad zurück.
+Hinweis: Expert/Dev läuft in dieser App nur im Self-Hosted-Modus (`OCR_EXPERT_MODE=selfhosted`).
 
 Response-Format:
 
@@ -73,6 +82,7 @@ Response-Format:
   "text": "...",
   "structured": null,
   "model": "glm-ocr:latest",
+  "backend": "direct",
   "mode": "plain",
   "schema_name": null,
   "latency_ms": 1234,
@@ -135,7 +145,7 @@ GPU-Hinweise:
 - Compose ist für den `ollama`-Service auf NVIDIA-GPUs konfiguriert.
 - Erfordert NVIDIA-Treiber + NVIDIA Container Toolkit auf dem Host.
 - Optionale Overrides:
-  - `DEFAULT_TOKEN_LIMIT` (Standard: `4096`)
+  - `DEFAULT_TOKEN_LIMIT` (Standard: `16384`)
   - `OLLAMA_GPU_DEVICES` (Standard: `all`)
   - `NVIDIA_VISIBLE_DEVICES` (Standard: `all`)
   - `NVIDIA_DRIVER_CAPABILITIES` (Standard: `compute,utility`)

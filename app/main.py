@@ -11,6 +11,8 @@ from fastapi.templating import Jinja2Templates
 
 from app.api.routes import router
 from app.config import Settings, get_settings
+from app.services.backend_router import OCRBackendRouter
+from app.services.expert_pipeline import GLMOCRExpertPipeline
 from app.services.ocr_pipeline import OCRPipeline
 from app.services.ollama_client import OllamaClient
 
@@ -41,8 +43,25 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
         default_token_limit=settings.default_token_limit,
         max_image_dim=settings.max_image_dim,
     )
+    expert_pipeline = GLMOCRExpertPipeline(
+        direct_pipeline=ocr_pipeline,
+        default_model=settings.ollama_model,
+        mode=settings.ocr_expert_mode,
+        ocr_api_host=settings.ocr_expert_ocr_api_host,
+        ocr_api_port=settings.ocr_expert_ocr_api_port,
+        timeout_s=settings.request_timeout_s,
+        enable_layout=settings.ocr_expert_enable_layout,
+    )
+    ocr_backend_router = OCRBackendRouter(
+        default_backend=settings.ocr_backend,
+        backends={
+            "direct": ocr_pipeline,
+            "expert": expert_pipeline,
+        },
+    )
     app.state.ollama_client = ollama_client
     app.state.ocr_pipeline = ocr_pipeline
+    app.state.ocr_backend_router = ocr_backend_router
 
     base_dir = Path(__file__).resolve().parent
     templates = Jinja2Templates(directory=str(base_dir / "templates"))
@@ -64,6 +83,8 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
             context={
                 "default_model": settings.ollama_model,
                 "default_token_limit": settings.default_token_limit,
+                "default_backend": settings.ocr_backend,
+                "default_expert_enable_layout": settings.ocr_expert_enable_layout,
                 "static_version": version,
                 "app_base_path": app_base_path,
             },
