@@ -45,11 +45,12 @@ uv run uvicorn app.main:app --reload
 
 `POST /api/ocr` (multipart/form-data) Felder:
 
-- `file`: Bild oder PDF (`image/png`, `image/jpeg`, `image/webp`, `application/pdf`)
+- `file`: Bild oder PDF (`image/png`, `image/jpeg`, `image/webp`, `image/gif`, `image/tif`, `image/tiff`, `image/x-tiff`, `application/pdf`)
 - `mode`: `plain` oder `structured`
 - `schema_name`: erforderlich bei `mode=structured`
 - `model`: optionale Modell-Überschreibung
 - `token_limit`: optionale Token-/Kontextgrenze (`1..128000`), wird als Ollama-`num_ctx` gesetzt
+- `gif_max_frames`: optionales Frame-Limit für animierte GIFs (`1..32`, Standard: `8`)
 - `task`: Klartext-Aufgabenpreset (`ocr_text`, `describe_image`, `read_scene_text`, `extract_table_markdown`, `summarize_document`)
 - `custom_prompt`: optionaler Klartext-Prompt, hat Vorrang vor `task`
 
@@ -62,6 +63,8 @@ Beispiele für `schema_name`:
 - `business_card_basic`
 
 Hinweis: Bei PDF-Dateien werden alle Seiten verarbeitet.
+Hinweis: Animierte GIFs werden als Mehrseiten-Eingabe behandelt; bis zu 8 Frames werden gleichmäßig gesampelt verarbeitet.
+Hinweis: Für `task=describe_image` bei animierten GIFs wird effizient ein Storyboard aus Sample-Frames in einem Einzelaufruf beschrieben.
 
 Response-Format:
 

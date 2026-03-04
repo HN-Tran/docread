@@ -47,12 +47,42 @@ class FakeOllamaClient:
 
 def _pdf_bytes(page_count: int = 1) -> bytes:
     first_image = Image.new("RGB", (12, 12), color=(255, 255, 255))
-    extra_images = [Image.new("RGB", (12, 12), color=(255, 255, 255)) for _ in range(page_count - 1)]
+    extra_images = [
+        Image.new("RGB", (12, 12), color=(255, 255, 255)) for _ in range(page_count - 1)
+    ]
     output = BytesIO()
     if extra_images:
         first_image.save(output, format="PDF", save_all=True, append_images=extra_images)
     else:
         first_image.save(output, format="PDF")
+    return output.getvalue()
+
+
+def _tiff_bytes() -> bytes:
+    image = Image.new("RGB", (12, 12), color=(255, 255, 255))
+    output = BytesIO()
+    image.save(output, format="TIFF")
+    return output.getvalue()
+
+
+def _gif_bytes(frame_count: int = 1) -> bytes:
+    first_image = Image.new("RGB", (12, 12), color=(255, 255, 255))
+    extra_images = [
+        Image.new("RGB", (12, 12), color=(255, 255, max(0, 255 - (index + 1))))
+        for index in range(frame_count - 1)
+    ]
+    output = BytesIO()
+    if extra_images:
+        first_image.save(
+            output,
+            format="GIF",
+            save_all=True,
+            append_images=extra_images,
+            duration=80,
+            loop=0,
+        )
+    else:
+        first_image.save(output, format="GIF")
     return output.getvalue()
 
 
@@ -422,6 +452,38 @@ def test_token_limit_must_not_exceed_max() -> None:
     assert "token_limit darf 128000 nicht überschreiten" in str(exc_info.value)
 
 
+def test_gif_max_frames_must_be_positive() -> None:
+    fake_client = FakeOllamaClient()
+    pipeline = _pipeline(fake_client)
+    with pytest.raises(ValueError) as exc_info:
+        asyncio.run(
+            pipeline.run(
+                image_bytes=_gif_bytes(frame_count=2),
+                content_type="image/gif",
+                mode="plain",
+                schema_name=None,
+                gif_max_frames=0,
+            )
+        )
+    assert "gif_max_frames muss eine positive ganze Zahl sein" in str(exc_info.value)
+
+
+def test_gif_max_frames_must_not_exceed_max() -> None:
+    fake_client = FakeOllamaClient()
+    pipeline = _pipeline(fake_client)
+    with pytest.raises(ValueError) as exc_info:
+        asyncio.run(
+            pipeline.run(
+                image_bytes=_gif_bytes(frame_count=2),
+                content_type="image/gif",
+                mode="plain",
+                schema_name=None,
+                gif_max_frames=33,
+            )
+        )
+    assert "gif_max_frames darf 32 nicht überschreiten" in str(exc_info.value)
+
+
 def test_pdf_input_is_rendered_to_png_before_ollama_call() -> None:
     fake_client = FakeOllamaClient()
     pipeline = _pipeline(fake_client)
@@ -434,6 +496,86 @@ def test_pdf_input_is_rendered_to_png_before_ollama_call() -> None:
         )
     )
     assert fake_client.last_image_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_tiff_input_is_rendered_to_png_before_ollama_call() -> None:
+    fake_client = FakeOllamaClient()
+    pipeline = _pipeline(fake_client)
+    asyncio.run(
+        pipeline.run(
+            image_bytes=_tiff_bytes(),
+            content_type="image/tiff",
+            mode="plain",
+            schema_name=None,
+        )
+    )
+    assert fake_client.last_image_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_gif_input_is_rendered_to_png_before_ollama_call() -> None:
+    fake_client = FakeOllamaClient()
+    pipeline = _pipeline(fake_client)
+    asyncio.run(
+        pipeline.run(
+            image_bytes=_gif_bytes(),
+            content_type="image/gif",
+            mode="plain",
+            schema_name=None,
+        )
+    )
+    assert fake_client.last_image_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_animated_gif_plain_samples_frames_with_warning() -> None:
+    fake_client = FakeOllamaClient(responses=[f"Frame {index + 1}" for index in range(8)])
+    pipeline = _pipeline(fake_client)
+    result = asyncio.run(
+        pipeline.run(
+            image_bytes=_gif_bytes(frame_count=10),
+            content_type="image/gif",
+            mode="plain",
+            schema_name=None,
+        )
+    )
+
+    assert len(fake_client.prompts) == 8
+    assert "--- Seite 1 ---" in result.text
+    assert "--- Seite 8 ---" in result.text
+    assert any("Animiertes GIF mit 10 Frames; 8 Frames" in warning for warning in result.warnings)
+
+
+def test_animated_gif_respects_custom_gif_max_frames() -> None:
+    fake_client = FakeOllamaClient(responses=["Frame 1", "Frame 2", "Frame 3"])
+    pipeline = _pipeline(fake_client)
+    result = asyncio.run(
+        pipeline.run(
+            image_bytes=_gif_bytes(frame_count=10),
+            content_type="image/gif",
+            mode="plain",
+            schema_name=None,
+            gif_max_frames=3,
+        )
+    )
+    assert len(fake_client.prompts) == 3
+    assert any("Animiertes GIF mit 10 Frames; 3 Frames" in warning for warning in result.warnings)
+
+
+def test_animated_gif_describe_image_uses_single_storyboard_call() -> None:
+    fake_client = FakeOllamaClient(responses=["Ein Hund springt über ein Sofa."])
+    pipeline = _pipeline(fake_client)
+    result = asyncio.run(
+        pipeline.run(
+            image_bytes=_gif_bytes(frame_count=10),
+            content_type="image/gif",
+            mode="plain",
+            schema_name=None,
+            task="describe_image",
+        )
+    )
+    assert len(fake_client.prompts) == 1
+    assert "chronological storyboard" in fake_client.last_prompt
+    assert "Ein Hund springt über ein Sofa." == result.text
+    assert any("Storyboard" in warning for warning in result.warnings)
 
 
 def test_multi_page_pdf_plain_processes_all_pages() -> None:

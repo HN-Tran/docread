@@ -28,6 +28,9 @@ SUPPORTED_PLAIN_TASKS = (
     PLAIN_TASK_SUMMARIZE_DOCUMENT,
 )
 MAX_TOKEN_LIMIT = 128000
+DEFAULT_GIF_MAX_FRAMES = 8
+MAX_GIF_MAX_FRAMES = 32
+MAX_GIF_STORYBOARD_FRAMES = 4
 AUTO_SCHEMA_NAME = "auto"
 PLAIN_TASK_PROMPTS: dict[str, str] = {
     PLAIN_TASK_DESCRIBE_IMAGE: "Describe this image briefly.",
@@ -83,8 +86,7 @@ PLAIN_TASK_FINAL_RETRY_PROMPTS: dict[str, str] = {
         "If text dominates, summarize it briefly instead of transcribing."
     ),
     PLAIN_TASK_READ_SCENE_TEXT: (
-        "Nur sichtbaren Text mit Zeilenumbrüchen transkribieren. "
-        "Keine Anweisungen wiederholen."
+        "Nur sichtbaren Text mit Zeilenumbrüchen transkribieren. Keine Anweisungen wiederholen."
     ),
     PLAIN_TASK_TABLE_MARKDOWN: (
         "Nur Tabellen als Markdown ausgeben. Keine Anweisungen wiederholen."
@@ -187,6 +189,99 @@ class OCRPipeline:
         finally:
             if document is not None and hasattr(document, "close"):
                 document.close()
+
+    @staticmethod
+    def _sample_indices(*, total_items: int, sample_size: int) -> list[int]:
+        if total_items <= 0:
+            return []
+        bounded_size = max(1, sample_size)
+        if total_items <= bounded_size:
+            return list(range(total_items))
+        if bounded_size == 1:
+            return [0]
+        return [((total_items - 1) * idx) // (bounded_size - 1) for idx in range(bounded_size)]
+
+    def _render_gif_frames(
+        self, gif_bytes: bytes, *, max_frames: int
+    ) -> tuple[list[bytes], list[str]]:
+        warnings: list[str] = []
+        rendered_frames: list[bytes] = []
+
+        try:
+            with Image.open(BytesIO(gif_bytes)) as gif_image:
+                frame_count = int(getattr(gif_image, "n_frames", 1))
+                if frame_count < 1:
+                    raise ValueError("GIF enthält keine Frames")
+
+                frame_indices = self._sample_indices(
+                    total_items=frame_count, sample_size=max_frames
+                )
+
+                if frame_count > max_frames:
+                    warnings.append(
+                        f"Animiertes GIF mit {frame_count} Frames; {len(frame_indices)} Frames wurden gleichmäßig gesampelt verarbeitet"
+                    )
+                else:
+                    if frame_count > 1:
+                        warnings.append(
+                            f"Animiertes GIF mit {frame_count} Frames; alle Frames wurden verarbeitet"
+                        )
+
+                for frame_index in frame_indices:
+                    gif_image.seek(frame_index)
+                    frame = gif_image.copy()
+                    if frame.mode != "RGB":
+                        frame = frame.convert("RGB")
+                    output = BytesIO()
+                    frame.save(output, format="PNG", optimize=True)
+                    rendered_frames.append(output.getvalue())
+            return rendered_frames, warnings
+        except ValueError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError("GIF konnte nicht verarbeitet werden") from exc
+
+    def _build_storyboard_from_prepared_images(
+        self, prepared_images: list[bytes]
+    ) -> tuple[bytes, list[str]]:
+        if not prepared_images:
+            raise ValueError("Es sind keine GIF-Frames für das Storyboard verfügbar")
+
+        frame_indices = self._sample_indices(
+            total_items=len(prepared_images), sample_size=MAX_GIF_STORYBOARD_FRAMES
+        )
+        storyboard_frames: list[Image.Image] = []
+        for frame_index in frame_indices:
+            with Image.open(BytesIO(prepared_images[frame_index])) as frame_image:
+                storyboard_frames.append(frame_image.convert("RGB"))
+
+        columns = 2 if len(storyboard_frames) > 2 else len(storyboard_frames)
+        rows = (len(storyboard_frames) + columns - 1) // columns
+        cell_width = max(frame.width for frame in storyboard_frames)
+        cell_height = max(frame.height for frame in storyboard_frames)
+
+        storyboard = Image.new(
+            "RGB", (columns * cell_width, rows * cell_height), color=(255, 255, 255)
+        )
+        for index, frame in enumerate(storyboard_frames):
+            row = index // columns
+            column = index % columns
+            x_offset = column * cell_width + (cell_width - frame.width) // 2
+            y_offset = row * cell_height + (cell_height - frame.height) // 2
+            storyboard.paste(frame, (x_offset, y_offset))
+
+        output = BytesIO()
+        storyboard.save(output, format="PNG", optimize=True)
+        prepared_storyboard, preprocess_warnings = self._preprocess(output.getvalue())
+        warnings = [
+            (
+                "Animiertes GIF wurde für describe_image als Storyboard aus "
+                f"{len(frame_indices)} von {len(prepared_images)} Frames zusammengefasst "
+                "(effizienter Einzelaufruf)."
+            )
+        ]
+        warnings.extend(preprocess_warnings)
+        return prepared_storyboard, warnings
 
     def _build_plain_prompt(self, *, selected_task: str, custom_prompt: str | None) -> str:
         if custom_prompt and custom_prompt.strip():
@@ -298,12 +393,18 @@ class OCRPipeline:
 
         short_lines = sum(1 for line in lines if len(line.split()) <= 5)
         numeric_like = sum(1 for line in lines if any(ch.isdigit() for ch in line))
-        field_like = sum(1 for line in lines if any(token in line for token in (":", "#", "=", "/", "|")))
+        field_like = sum(
+            1 for line in lines if any(token in line for token in (":", "#", "=", "/", "|"))
+        )
         upper_heavy = sum(
             1
             for line in lines
             if len(line) >= 6
-            and (sum(1 for ch in line if ch.isupper()) / max(1, sum(1 for ch in line if ch.isalpha()))) > 0.6
+            and (
+                sum(1 for ch in line if ch.isupper())
+                / max(1, sum(1 for ch in line if ch.isalpha()))
+            )
+            > 0.6
         )
 
         if short_lines >= max(3, int(len(lines) * 0.6)) and (numeric_like >= 2 or field_like >= 2):
@@ -390,12 +491,17 @@ class OCRPipeline:
         return f"Seite {page_number}: {warning}"
 
     def _prepare_images(
-        self, *, image_bytes: bytes, content_type: str | None
+        self, *, image_bytes: bytes, content_type: str | None, gif_max_frames: int
     ) -> tuple[list[bytes], list[str]]:
         warnings: list[str] = []
         if content_type == "application/pdf":
             source_images, pdf_warnings = self._render_pdf_pages(image_bytes)
             warnings.extend(pdf_warnings)
+        elif content_type == "image/gif":
+            source_images, gif_warnings = self._render_gif_frames(
+                image_bytes, max_frames=gif_max_frames
+            )
+            warnings.extend(gif_warnings)
         else:
             source_images = [image_bytes]
 
@@ -405,8 +511,7 @@ class OCRPipeline:
             prepared_image, preprocess_warnings = self._preprocess(page_image)
             prepared_images.append(prepared_image)
             warnings.extend(
-                self._with_page_prefix(warning, idx, total_pages)
-                for warning in preprocess_warnings
+                self._with_page_prefix(warning, idx, total_pages) for warning in preprocess_warnings
             )
         return prepared_images, warnings
 
@@ -458,15 +563,15 @@ class OCRPipeline:
                 if self._looks_like_prompt_echo(prompt=retry_prompt, output=raw_output):
                     warnings.append("Modell gibt weiterhin promptähnlichen Text zurück.")
                     needs_final_retry = True
-                if selected_plain_task == PLAIN_TASK_OCR_TEXT and self._looks_like_image_description(
-                    raw_output
+                if (
+                    selected_plain_task == PLAIN_TASK_OCR_TEXT
+                    and self._looks_like_image_description(raw_output)
                 ):
-                    warnings.append(
-                        "Antwort wirkte weiterhin wie Bildbeschreibung statt OCR-Text."
-                    )
+                    warnings.append("Antwort wirkte weiterhin wie Bildbeschreibung statt OCR-Text.")
                     needs_final_retry = True
-                if selected_plain_task == PLAIN_TASK_DESCRIBE_IMAGE and self._looks_like_ocr_transcript(
-                    raw_output
+                if (
+                    selected_plain_task == PLAIN_TASK_DESCRIBE_IMAGE
+                    and self._looks_like_ocr_transcript(raw_output)
                 ):
                     warnings.append("Antwort wirkte weiterhin wie OCR-Transkript; finaler Retry.")
                     needs_final_retry = True
@@ -483,13 +588,18 @@ class OCRPipeline:
                     )
                     if self._looks_like_prompt_echo(prompt=final_retry_prompt, output=raw_output):
                         warnings.append("Modell spiegelt weiterhin die Anweisung statt Inhalt.")
-                    if selected_plain_task == PLAIN_TASK_OCR_TEXT and self._looks_like_image_description(
-                        raw_output
+                    if (
+                        selected_plain_task == PLAIN_TASK_OCR_TEXT
+                        and self._looks_like_image_description(raw_output)
                     ):
                         warnings.append("Modell liefert weiterhin Bildbeschreibung statt OCR-Text.")
 
         text = raw_output.strip()
-        if not has_custom_plain_prompt and text and self._looks_like_prompt_echo(prompt=prompt, output=text):
+        if (
+            not has_custom_plain_prompt
+            and text
+            and self._looks_like_prompt_echo(prompt=prompt, output=text)
+        ):
             warnings.append("Ausgabe wurde als Prompt-Echo verworfen.")
             if selected_plain_task == PLAIN_TASK_OCR_TEXT:
                 text = "Kein verwertbarer OCR-Text erkannt."
@@ -555,19 +665,29 @@ class OCRPipeline:
         task: str | None = None,
         custom_prompt: str | None = None,
         token_limit: int | None = None,
+        gif_max_frames: int | None = None,
     ) -> OCRResult:
         warnings: list[str] = []
         selected_plain_task = (task or PLAIN_TASK_OCR_TEXT).strip()
         selected_model = (model or "").strip() or self.default_model
         selected_token_limit = self.default_token_limit if token_limit is None else token_limit
+        selected_gif_max_frames = (
+            DEFAULT_GIF_MAX_FRAMES if gif_max_frames is None else gif_max_frames
+        )
         has_custom_plain_prompt = bool(custom_prompt and custom_prompt.strip())
         if selected_token_limit < 1:
             raise ValueError("token_limit muss eine positive ganze Zahl sein")
         if selected_token_limit > MAX_TOKEN_LIMIT:
             raise ValueError(f"token_limit darf {MAX_TOKEN_LIMIT} nicht überschreiten")
+        if selected_gif_max_frames < 1:
+            raise ValueError("gif_max_frames muss eine positive ganze Zahl sein")
+        if selected_gif_max_frames > MAX_GIF_MAX_FRAMES:
+            raise ValueError(f"gif_max_frames darf {MAX_GIF_MAX_FRAMES} nicht überschreiten")
 
         prepared_images, prepare_warnings = self._prepare_images(
-            image_bytes=image_bytes, content_type=content_type
+            image_bytes=image_bytes,
+            content_type=content_type,
+            gif_max_frames=selected_gif_max_frames,
         )
         warnings.extend(prepare_warnings)
         total_pages = len(prepared_images)
@@ -607,29 +727,55 @@ class OCRPipeline:
         start = time.perf_counter()
 
         if mode == "plain":
-            page_texts: list[str] = []
-            for page_index, prepared_image in enumerate(prepared_images, start=1):
-                page_text, page_warnings = await self._run_plain_on_image(
-                    prepared_image=prepared_image,
-                    prompt=prompt,
+            if (
+                content_type == "image/gif"
+                and selected_plain_task == PLAIN_TASK_DESCRIBE_IMAGE
+                and len(prepared_images) > 1
+            ):
+                describe_prompt = prompt
+                if not has_custom_plain_prompt:
+                    describe_prompt = (
+                        "You are given a chronological storyboard from one animated GIF "
+                        "(read left-to-right, top-to-bottom). Describe the visual action in 1-3 concise sentences. "
+                        "If no visible text exists, focus on scene/action only."
+                    )
+                storyboard_image, storyboard_warnings = self._build_storyboard_from_prepared_images(
+                    prepared_images
+                )
+                warnings.extend(storyboard_warnings)
+                text, storyboard_run_warnings = await self._run_plain_on_image(
+                    prepared_image=storyboard_image,
+                    prompt=describe_prompt,
                     selected_plain_task=selected_plain_task,
                     selected_model=selected_model,
                     selected_token_limit=selected_token_limit,
                     has_custom_plain_prompt=has_custom_plain_prompt,
                 )
-                page_texts.append(page_text)
-                warnings.extend(
-                    self._with_page_prefix(warning, page_index, total_pages)
-                    for warning in page_warnings
-                )
-
-            if total_pages <= 1:
-                text = page_texts[0] if page_texts else ""
+                warnings.extend(storyboard_run_warnings)
             else:
-                text = "\n\n".join(
-                    f"--- Seite {page_index} ---\n{page_texts[page_index - 1]}"
-                    for page_index in range(1, total_pages + 1)
-                )
+                page_texts: list[str] = []
+                for page_index, prepared_image in enumerate(prepared_images, start=1):
+                    page_text, page_warnings = await self._run_plain_on_image(
+                        prepared_image=prepared_image,
+                        prompt=prompt,
+                        selected_plain_task=selected_plain_task,
+                        selected_model=selected_model,
+                        selected_token_limit=selected_token_limit,
+                        has_custom_plain_prompt=has_custom_plain_prompt,
+                    )
+                    page_texts.append(page_text)
+                    warnings.extend(
+                        self._with_page_prefix(warning, page_index, total_pages)
+                        for warning in page_warnings
+                    )
+
+                if total_pages <= 1:
+                    text = page_texts[0] if page_texts else ""
+                else:
+                    text = "\n\n".join(
+                        f"--- Seite {page_index} ---\n{page_texts[page_index - 1]}"
+                        for page_index in range(1, total_pages + 1)
+                    )
             structured = None
         else:
             schema = SCHEMA_REGISTRY[resolved_schema_name or ""]

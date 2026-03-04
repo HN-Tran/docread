@@ -12,7 +12,16 @@ from app.services.ocr_pipeline import OCRPipeline
 from app.services.ollama_client import OllamaClient, OllamaError
 
 router = APIRouter(prefix="/api")
-ALLOWED_MIME_TYPES = {"image/png", "image/jpeg", "image/webp", "application/pdf"}
+ALLOWED_MIME_TYPES = {
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/gif",
+    "image/tif",
+    "image/tiff",
+    "image/x-tiff",
+    "application/pdf",
+}
 
 
 def get_ocr_pipeline(request: Request) -> OCRPipeline:
@@ -61,6 +70,7 @@ async def ocr(
     task: str | None = Form(None),
     custom_prompt: str | None = Form(None),
     token_limit: int | None = Form(None),
+    gif_max_frames: int | None = Form(None),
     pipeline: OCRPipeline = Depends(get_ocr_pipeline),
 ) -> dict:
     settings = get_settings()
@@ -92,6 +102,7 @@ async def ocr(
             task=task,
             custom_prompt=custom_prompt,
             token_limit=token_limit,
+            gif_max_frames=gif_max_frames,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

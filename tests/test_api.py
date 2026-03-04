@@ -57,6 +57,7 @@ class FakePipeline:
         task: str | None,
         custom_prompt: str | None,
         token_limit: int | None,
+        gif_max_frames: int | None,
     ) -> Any:
         self.last_call = {
             "image_bytes": image_bytes,
@@ -67,6 +68,7 @@ class FakePipeline:
             "task": task,
             "custom_prompt": custom_prompt,
             "token_limit": token_limit,
+            "gif_max_frames": gif_max_frames,
         }
         if mode == "structured" and not schema_name:
             raise ValueError("schema_name ist für den strukturierten Modus erforderlich")
@@ -212,6 +214,64 @@ def test_ocr_accepts_pdf_content_type() -> None:
     )
     assert response["text"] == "hello world"
     assert fake_pipeline.last_call["content_type"] == "application/pdf"
+
+
+@pytest.mark.parametrize("content_type", ["image/tif", "image/tiff", "image/x-tiff"])
+def test_ocr_accepts_tiff_content_type(content_type: str) -> None:
+    fake_pipeline = FakePipeline()
+    response = asyncio.run(
+        ocr(
+            request=_request(),
+            file=_upload_file(content=b"II*\x00", content_type=content_type),
+            mode="plain",
+            schema_name=None,
+            model=None,
+            task=None,
+            custom_prompt=None,
+            token_limit=None,
+            pipeline=cast(OCRPipeline, fake_pipeline),
+        )
+    )
+    assert response["text"] == "hello world"
+    assert fake_pipeline.last_call["content_type"] == content_type
+
+
+def test_ocr_accepts_gif_content_type() -> None:
+    fake_pipeline = FakePipeline()
+    response = asyncio.run(
+        ocr(
+            request=_request(),
+            file=_upload_file(content=b"GIF89a", content_type="image/gif"),
+            mode="plain",
+            schema_name=None,
+            model=None,
+            task=None,
+            custom_prompt=None,
+            token_limit=None,
+            pipeline=cast(OCRPipeline, fake_pipeline),
+        )
+    )
+    assert response["text"] == "hello world"
+    assert fake_pipeline.last_call["content_type"] == "image/gif"
+
+
+def test_ocr_forwards_gif_max_frames() -> None:
+    fake_pipeline = FakePipeline()
+    asyncio.run(
+        ocr(
+            request=_request(),
+            file=_upload_file(content=b"GIF89a", content_type="image/gif"),
+            mode="plain",
+            schema_name=None,
+            model=None,
+            task="describe_image",
+            custom_prompt=None,
+            token_limit=None,
+            gif_max_frames=5,
+            pipeline=cast(OCRPipeline, fake_pipeline),
+        )
+    )
+    assert fake_pipeline.last_call["gif_max_frames"] == 5
 
 
 def test_api_v1_alias_routes_exist() -> None:

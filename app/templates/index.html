@@ -42,7 +42,7 @@
             id="file"
             name="file"
             type="file"
-            accept="image/png,image/jpeg,image/webp,application/pdf"
+            accept="image/png,image/jpeg,image/webp,image/gif,image/tiff,.gif,.tif,.tiff,application/pdf"
             required
             class="hidden"
           />
@@ -55,7 +55,9 @@
             </div>
             <div class="onboarding-actions">
               <button id="pick-file-btn" class="pick-file-btn" type="button">Datei auswählen</button>
-              <p class="onboarding-hint">Unterstützt PNG, JPEG, WEBP und mehrseitige PDFs.</p>
+              <p class="onboarding-hint">
+                Unterstützt PNG, JPEG, WEBP, GIF, TIFF und mehrseitige PDFs.
+              </p>
             </div>
           </section>
 
@@ -133,6 +135,20 @@
                 step="1"
                 placeholder="{{ default_token_limit }}"
               />
+            </label>
+
+            <label>
+              GIF-Frames (optional)
+              <input
+                id="gif_max_frames"
+                name="gif_max_frames"
+                type="number"
+                min="1"
+                max="32"
+                step="1"
+                placeholder="8"
+              />
+              <span class="hint">Nur für animierte GIFs. Höher = mehr Abdeckung, langsamer.</span>
             </label>
 
             <div class="advanced-apply-row">

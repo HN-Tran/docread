@@ -7,6 +7,7 @@ const customPromptEl = document.getElementById("custom_prompt");
 const schemaNameEl = document.getElementById("schema_name");
 const modelEl = document.getElementById("model");
 const tokenLimitEl = document.getElementById("token_limit");
+const gifMaxFramesEl = document.getElementById("gif_max_frames");
 const applyOptionsBtnEl = document.getElementById("apply-options-btn");
 const advancedDirtyHintEl = document.getElementById("advanced-dirty-hint");
 const taskWrap = document.getElementById("task-wrap");
@@ -48,6 +49,7 @@ let globalDragDepth = 0;
 let hasPendingAdvancedChanges = false;
 const THEME_KEY = "ocr-demo-theme";
 const MAX_TOKEN_LIMIT = 128000;
+const MAX_GIF_FRAMES = 32;
 
 function isStructuredMode(modeValue) {
   return modeValue === "structured";
@@ -228,6 +230,20 @@ function buildPayload() {
     payload.set("token_limit", String(tokenLimit));
   } else {
     payload.delete("token_limit");
+  }
+
+  const gifMaxFramesRaw = String(payload.get("gif_max_frames") || "").trim();
+  if (gifMaxFramesRaw) {
+    const gifMaxFrames = Number(gifMaxFramesRaw);
+    if (!Number.isInteger(gifMaxFrames) || gifMaxFrames < 1) {
+      throw new Error("GIF-Frames muss eine positive ganze Zahl sein.");
+    }
+    if (gifMaxFrames > MAX_GIF_FRAMES) {
+      throw new Error(`GIF-Frames darf ${MAX_GIF_FRAMES} nicht überschreiten.`);
+    }
+    payload.set("gif_max_frames", String(gifMaxFrames));
+  } else {
+    payload.delete("gif_max_frames");
   }
 
   const isStructured = payload.get("mode") === "structured";
@@ -735,6 +751,9 @@ modelEl.addEventListener("input", () => {
   setAdvancedDirty(true);
 });
 tokenLimitEl.addEventListener("input", () => {
+  setAdvancedDirty(true);
+});
+gifMaxFramesEl.addEventListener("input", () => {
   setAdvancedDirty(true);
 });
 customPromptEl.addEventListener("input", () => {
