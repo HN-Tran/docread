@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any, cast
+
+import pytest
 
 from app.services.expert_pipeline import GLMOCRExpertPipeline
 from app.services.ocr_pipeline import OCRPipeline, OCRResult
+from app.services.ollama_client import OllamaError
 
 
 def _png_bytes() -> bytes:
@@ -46,8 +51,17 @@ class _FakeDirectPipeline:
 
 
 class _FakeParser:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        layout: list[dict[str, object]] | None = None,
+        layout_visualizations: list[Any] | None = None,
+    ) -> None:
         self.calls = 0
+        self.layout = layout
+        self.layout_visualizations = layout_visualizations
+        self.last_save_layout_visualization: bool | None = None
+        self.markdown_result = "Expert OCR text"
 
     def parse(
         self,
@@ -57,12 +71,15 @@ class _FakeParser:
         save_layout_visualization: bool = False,
     ) -> Any:
         self.calls += 1
+        self.last_save_layout_visualization = save_layout_visualization
         return type(
             "ParseResult",
             (),
             {
-                "markdown_result": "Expert OCR text",
+                "markdown_result": self.markdown_result,
                 "_error": None,
+                "json_result": self.layout,
+                "_layout_visualization": self.layout_visualizations,
             },
         )()
 
@@ -118,6 +135,7 @@ def test_expert_uses_glm_parser_for_plain_ocr_text() -> None:
     assert result.text == "Expert OCR text"
     assert parser.calls == 1
     assert direct.calls == 0
+    assert result.layout is None
 
 
 def test_expert_respects_layout_override() -> None:
@@ -151,3 +169,139 @@ def test_expert_respects_layout_override() -> None:
     )
     assert result.text == "Expert OCR text"
     assert selected_layout_values == [False]
+    assert parser.last_save_layout_visualization is False
+
+
+def test_expert_returns_layout_pages_and_visualizations() -> None:
+    direct = _FakeDirectPipeline()
+    with NamedTemporaryFile(suffix=".png", delete=False) as vis_file:
+        vis_file.write(_png_bytes())
+        vis_path = Path(vis_file.name)
+
+    parser = _FakeParser(
+        layout=[
+            {
+                "regions": [
+                    {
+                        "index": 0,
+                        "label": "text_block",
+                        "content": "Expert OCR text",
+                        "bbox_2d": [100, 120, 900, 260],
+                    }
+                ]
+            }
+        ],
+        layout_visualizations=[vis_path],
+    )
+    expert = GLMOCRExpertPipeline(
+        direct_pipeline=cast(OCRPipeline, direct),
+        default_model="glm-ocr:latest",
+        mode="selfhosted",
+        ocr_api_host="localhost",
+        ocr_api_port=11434,
+        timeout_s=60.0,
+        enable_layout=True,
+    )
+    expert._get_parser = lambda *, model, enable_layout: parser  # type: ignore[method-assign]
+
+    try:
+        result = asyncio.run(
+            expert.run(
+                image_bytes=_png_bytes(),
+                content_type="image/png",
+                mode="plain",
+                schema_name=None,
+            )
+        )
+    finally:
+        vis_path.unlink(missing_ok=True)
+
+    assert result.layout == [
+        {
+            "page_number": 1,
+            "regions": [
+                {
+                    "index": 0,
+                    "label": "text_block",
+                    "content": "Expert OCR text",
+                    "bbox_2d": [100.0, 120.0, 900.0, 260.0],
+                }
+            ],
+        }
+    ]
+    assert result.layout_visualizations is not None
+    assert len(result.layout_visualizations) == 1
+    assert result.layout_visualizations[0].startswith("data:image/png;base64,")
+    assert any("Expert-Layout: 1 Regionen auf 1 Seite(n) erkannt." in w for w in result.warnings)
+
+
+def test_expert_rebuilds_text_from_layout_when_markdown_is_empty_wrapper() -> None:
+    direct = _FakeDirectPipeline()
+    parser = _FakeParser(
+        layout=[
+            {
+                "regions": [
+                    {
+                        "index": 0,
+                        "label": "text_block",
+                        "content": "RECHNUNG",
+                        "bbox_2d": [100, 120, 900, 200],
+                    },
+                    {
+                        "index": 1,
+                        "label": "text_block",
+                        "content": "INV-2026-005",
+                        "bbox_2d": [100, 210, 900, 280],
+                    },
+                ]
+            }
+        ]
+    )
+    parser.markdown_result = "```markdown\n\n```"
+
+    expert = GLMOCRExpertPipeline(
+        direct_pipeline=cast(OCRPipeline, direct),
+        default_model="glm-ocr:latest",
+        mode="selfhosted",
+        ocr_api_host="localhost",
+        ocr_api_port=11434,
+        timeout_s=60.0,
+        enable_layout=True,
+    )
+    expert._get_parser = lambda *, model, enable_layout: parser  # type: ignore[method-assign]
+
+    result = asyncio.run(
+        expert.run(
+            image_bytes=_png_bytes(),
+            content_type="image/png",
+            mode="plain",
+            schema_name=None,
+        )
+    )
+
+    assert result.text == "RECHNUNG\nINV-2026-005"
+    assert any("Text aus Layout-Regionen rekonstruiert" in w for w in result.warnings)
+
+
+def test_load_glmocr_class_reports_missing_package(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.services.expert_pipeline.find_spec", lambda name: None)
+
+    with pytest.raises(OllamaError, match="erfordert das Paket 'glmocr'"):
+        GLMOCRExpertPipeline._load_glmocr_class()
+
+
+def test_load_glmocr_class_reports_internal_import_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.services.expert_pipeline.find_spec", lambda name: object())
+
+    def _raise_import_error(name: str) -> Any:
+        raise ImportError("No module named 'torchvision'")
+
+    monkeypatch.setattr("app.services.expert_pipeline.importlib.import_module", _raise_import_error)
+
+    with pytest.raises(OllamaError) as exc_info:
+        GLMOCRExpertPipeline._load_glmocr_class()
+
+    assert "konnte 'glmocr.GlmOcr' nicht laden" in str(exc_info.value)
+    assert "torchvision" in str(exc_info.value)

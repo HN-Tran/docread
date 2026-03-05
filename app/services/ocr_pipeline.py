@@ -95,6 +95,24 @@ PLAIN_TASK_FINAL_RETRY_PROMPTS: dict[str, str] = {
         "Dokument in 3-5 deutschen Stichpunkten zusammenfassen. Keine Anweisungen wiederholen."
     ),
 }
+_FENCED_BLOCK_RE = re.compile(r"^```(?:[\w.+-]+)?\s*(?:\r?\n)?(.*?)\s*```$", re.DOTALL)
+
+
+def normalize_ocr_text_output(output: str) -> str:
+    stripped_output = output.strip()
+    fenced_match = _FENCED_BLOCK_RE.fullmatch(stripped_output)
+    if fenced_match is None:
+        return stripped_output
+    return fenced_match.group(1).strip()
+
+
+def is_empty_markdown_wrapper(output: str) -> bool:
+    if not output.strip():
+        return False
+    fenced_match = _FENCED_BLOCK_RE.fullmatch(output.strip())
+    if fenced_match is None:
+        return False
+    return not fenced_match.group(1).strip()
 
 
 @dataclass
@@ -106,6 +124,8 @@ class OCRResult:
     schema_name: str | None
     latency_ms: int
     warnings: list[str]
+    layout: list[dict[str, object]] | None = None
+    layout_visualizations: list[str] | None = None
 
 
 class OCRPipeline:
@@ -308,6 +328,17 @@ class OCRPipeline:
         raise ValueError(
             f"Unbekannte Aufgabe '{selected_task}'. Unterstützte Aufgaben: {', '.join(SUPPORTED_PLAIN_TASKS)}"
         )
+
+    @staticmethod
+    def _fallback_text_for_empty_output(selected_task: str) -> str:
+        fallback_texts = {
+            PLAIN_TASK_OCR_TEXT: "Kein verwertbarer OCR-Text erkannt.",
+            PLAIN_TASK_DESCRIBE_IMAGE: "Keine verwertbare Bildbeschreibung erzeugt.",
+            PLAIN_TASK_READ_SCENE_TEXT: "No visible text.",
+            PLAIN_TASK_TABLE_MARKDOWN: "No table detected.",
+            PLAIN_TASK_SUMMARIZE_DOCUMENT: "Kein lesbarer Inhalt.",
+        }
+        return fallback_texts.get(selected_task, "")
 
     def _looks_like_prompt_echo(self, *, prompt: str, output: str) -> bool:
         prompt_norm = re.sub(r"[^0-9a-zA-ZäöüÄÖÜß]+", " ", prompt.strip().lower())
@@ -539,6 +570,9 @@ class OCRPipeline:
 
         if not has_custom_plain_prompt:
             should_retry = self._looks_like_prompt_echo(prompt=prompt, output=raw_output)
+            if is_empty_markdown_wrapper(raw_output):
+                warnings.append("Leere Markdown-Hülle erkannt; Anfrage mit Kurzprompt wiederholt.")
+                should_retry = True
             if selected_plain_task == PLAIN_TASK_OCR_TEXT and self._looks_like_image_description(
                 raw_output
             ):
@@ -567,6 +601,9 @@ class OCRPipeline:
                 if self._looks_like_prompt_echo(prompt=retry_prompt, output=raw_output):
                     warnings.append("Modell gibt weiterhin promptähnlichen Text zurück.")
                     needs_final_retry = True
+                if is_empty_markdown_wrapper(raw_output):
+                    warnings.append("Modell liefert weiterhin nur eine leere Markdown-Hülle.")
+                    needs_final_retry = True
                 if (
                     selected_plain_task == PLAIN_TASK_OCR_TEXT
                     and self._looks_like_image_description(raw_output)
@@ -590,6 +627,8 @@ class OCRPipeline:
                         model=selected_model,
                         num_ctx=selected_token_limit,
                     )
+                    if is_empty_markdown_wrapper(raw_output):
+                        warnings.append("Modell liefert weiterhin eine leere Markdown-Hülle.")
                     if self._looks_like_prompt_echo(prompt=final_retry_prompt, output=raw_output):
                         warnings.append("Modell spiegelt weiterhin die Anweisung statt Inhalt.")
                     if (
@@ -598,7 +637,11 @@ class OCRPipeline:
                     ):
                         warnings.append("Modell liefert weiterhin Bildbeschreibung statt OCR-Text.")
 
-        text = raw_output.strip()
+        text = normalize_ocr_text_output(raw_output)
+        if is_empty_markdown_wrapper(raw_output):
+            warnings.append("Leere Markdown-Hülle wurde entfernt.")
+            if not text:
+                text = self._fallback_text_for_empty_output(selected_plain_task)
         if (
             not has_custom_plain_prompt
             and text

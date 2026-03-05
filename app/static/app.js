@@ -37,9 +37,15 @@ const themeLightBtn = document.getElementById("theme-light-btn");
 const themeDarkBtn = document.getElementById("theme-dark-btn");
 const loadingOverlayEl = document.getElementById("loading-overlay");
 const previewEmptyEl = document.getElementById("preview-empty");
+const previewImageStageEl = document.getElementById("preview-image-stage");
 const previewImageEl = document.getElementById("preview-image");
+const previewLayoutOverlayEl = document.getElementById("preview-layout-overlay");
 const previewPdfEl = document.getElementById("preview-pdf");
 const previewPdfLinkEl = document.getElementById("preview-pdf-link");
+const layoutWrapEl = document.getElementById("layout-wrap");
+const layoutSummaryEl = document.getElementById("layout-summary");
+const layoutPagesEl = document.getElementById("layout-pages");
+const layoutVisualizationsEl = document.getElementById("layout-visualizations");
 const appBasePath = (document.body?.dataset.basePath || "").replace(/\/$/, "");
 const ocrEndpoint = `${appBasePath}/api/ocr`;
 
@@ -114,6 +120,7 @@ function clearOutput() {
   downloadCsvBtn.classList.add("hidden");
   lastResponse = null;
   lastTableMatrices = [];
+  clearLayoutDisplay();
 }
 
 function setWorkspaceVisible(isVisible) {
@@ -167,8 +174,10 @@ function clearPreview(message = "Keine Datei ausgewählt.") {
   }
   previewEmptyEl.textContent = message;
   previewEmptyEl.classList.remove("hidden");
+  previewImageStageEl.classList.add("hidden");
   previewImageEl.classList.add("hidden");
   previewImageEl.removeAttribute("src");
+  clearLayoutOverlay();
   previewPdfEl.classList.add("hidden");
   previewPdfEl.removeAttribute("data");
   previewPdfLinkEl.classList.add("hidden");
@@ -189,9 +198,11 @@ function updatePreview() {
 
   previewUrl = URL.createObjectURL(file);
   previewEmptyEl.classList.add("hidden");
+  clearLayoutOverlay();
 
   if (file.type.startsWith("image/")) {
     previewImageEl.src = previewUrl;
+    previewImageStageEl.classList.remove("hidden");
     previewImageEl.classList.remove("hidden");
     previewPdfEl.classList.add("hidden");
     previewPdfEl.removeAttribute("data");
@@ -201,6 +212,7 @@ function updatePreview() {
   }
 
   if (file.type === "application/pdf") {
+    previewImageStageEl.classList.add("hidden");
     previewPdfEl.data = previewUrl;
     previewPdfEl.classList.remove("hidden");
     previewPdfLinkEl.href = previewUrl;
@@ -215,6 +227,197 @@ function updatePreview() {
 
 function currentFile() {
   return fileEl.files && fileEl.files[0] ? fileEl.files[0] : null;
+}
+
+function clearLayoutOverlay() {
+  previewLayoutOverlayEl.innerHTML = "";
+  previewLayoutOverlayEl.classList.add("hidden");
+}
+
+function clearLayoutDisplay() {
+  clearLayoutOverlay();
+  layoutSummaryEl.textContent = "";
+  layoutPagesEl.innerHTML = "";
+  layoutVisualizationsEl.innerHTML = "";
+  layoutVisualizationsEl.classList.add("hidden");
+  layoutWrapEl.classList.add("hidden");
+}
+
+function truncateText(value, maxLength = 140) {
+  const normalized = String(value || "").trim().replace(/\s+/g, " ");
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 1)}…`;
+}
+
+function normalizeLayoutPages(layout) {
+  if (!Array.isArray(layout)) {
+    return [];
+  }
+  return layout.filter(
+    (page) => page && typeof page === "object" && Array.isArray(page.regions)
+  );
+}
+
+function normalizedBboxToPercentages(bbox) {
+  if (!Array.isArray(bbox) || bbox.length !== 4) {
+    return null;
+  }
+  const values = bbox.map((value) => Number(value));
+  if (values.some((value) => !Number.isFinite(value))) {
+    return null;
+  }
+  const scale = Math.max(...values) <= 1.5 ? 1 : 1000;
+  const left = Math.max(0, Math.min(100, (values[0] / scale) * 100));
+  const top = Math.max(0, Math.min(100, (values[1] / scale) * 100));
+  const right = Math.max(0, Math.min(100, (values[2] / scale) * 100));
+  const bottom = Math.max(0, Math.min(100, (values[3] / scale) * 100));
+  if (right <= left || bottom <= top) {
+    return null;
+  }
+  return {
+    left,
+    top,
+    width: right - left,
+    height: bottom - top,
+  };
+}
+
+function renderLayoutOverlay(layoutPages) {
+  clearLayoutOverlay();
+  const file = currentFile();
+  if (!file || !file.type.startsWith("image/")) {
+    return;
+  }
+
+  const firstPage = layoutPages[0];
+  if (!firstPage || !Array.isArray(firstPage.regions)) {
+    return;
+  }
+
+  let overlayCount = 0;
+  firstPage.regions.forEach((region, index) => {
+    const percentages = normalizedBboxToPercentages(region.bbox_2d);
+    if (!percentages) {
+      return;
+    }
+
+    const boxEl = document.createElement("div");
+    boxEl.className = "preview-layout-box";
+    boxEl.style.left = `${percentages.left}%`;
+    boxEl.style.top = `${percentages.top}%`;
+    boxEl.style.width = `${percentages.width}%`;
+    boxEl.style.height = `${percentages.height}%`;
+
+    const label = String(region.label || `Region ${index + 1}`);
+    const contentPreview = truncateText(region.content || "", 80);
+    boxEl.title = contentPreview ? `${label}: ${contentPreview}` : label;
+
+    const badgeEl = document.createElement("span");
+    badgeEl.className = "preview-layout-badge";
+    badgeEl.textContent = label;
+    boxEl.appendChild(badgeEl);
+    previewLayoutOverlayEl.appendChild(boxEl);
+    overlayCount += 1;
+  });
+
+  previewLayoutOverlayEl.classList.toggle("hidden", overlayCount === 0);
+}
+
+function renderLayoutVisualizations(visualizations) {
+  layoutVisualizationsEl.innerHTML = "";
+  if (!Array.isArray(visualizations) || visualizations.length === 0) {
+    layoutVisualizationsEl.classList.add("hidden");
+    return;
+  }
+
+  visualizations.forEach((source, index) => {
+    const imgEl = document.createElement("img");
+    imgEl.src = String(source);
+    imgEl.alt = `Layout-Visualisierung ${index + 1}`;
+    imgEl.loading = "lazy";
+    layoutVisualizationsEl.appendChild(imgEl);
+  });
+  layoutVisualizationsEl.classList.remove("hidden");
+}
+
+function renderLayoutPanel(layoutPages, visualizations) {
+  clearLayoutDisplay();
+  if (layoutPages.length === 0 && (!Array.isArray(visualizations) || visualizations.length === 0)) {
+    return;
+  }
+
+  const regionCount = layoutPages.reduce(
+    (total, page) => total + (Array.isArray(page.regions) ? page.regions.length : 0),
+    0
+  );
+  const summaryParts = [];
+  if (layoutPages.length > 0) {
+    summaryParts.push(`${layoutPages.length} Seite(n)`);
+    summaryParts.push(`${regionCount} Region(en)`);
+  }
+  if (Array.isArray(visualizations) && visualizations.length > 0) {
+    summaryParts.push(`${visualizations.length} Visualisierung(en)`);
+  }
+  layoutSummaryEl.textContent = summaryParts.join(" | ");
+
+  layoutPages.forEach((page, pageIndex) => {
+    const pageCardEl = document.createElement("article");
+    pageCardEl.className = "layout-page-card";
+
+    const pageTitleEl = document.createElement("p");
+    pageTitleEl.className = "layout-page-title";
+    pageTitleEl.textContent = `Seite ${page.page_number || pageIndex + 1}`;
+    pageCardEl.appendChild(pageTitleEl);
+
+    const regions = Array.isArray(page.regions) ? page.regions : [];
+    if (regions.length === 0) {
+      const emptyEl = document.createElement("p");
+      emptyEl.className = "layout-page-empty";
+      emptyEl.textContent = "Keine Regionen im Layout-Output.";
+      pageCardEl.appendChild(emptyEl);
+      layoutPagesEl.appendChild(pageCardEl);
+      return;
+    }
+
+    const regionListEl = document.createElement("ol");
+    regionListEl.className = "layout-region-list";
+
+    regions.forEach((region, regionIndex) => {
+      const regionItemEl = document.createElement("li");
+      regionItemEl.className = "layout-region-item";
+
+      const regionHeadEl = document.createElement("div");
+      regionHeadEl.className = "layout-region-head";
+
+      const labelEl = document.createElement("strong");
+      labelEl.textContent = String(region.label || `Region ${regionIndex + 1}`);
+      regionHeadEl.appendChild(labelEl);
+
+      const metaEl = document.createElement("span");
+      metaEl.className = "layout-region-meta";
+      const bbox = Array.isArray(region.bbox_2d) ? region.bbox_2d.join(", ") : "ohne bbox";
+      metaEl.textContent = `#${region.index ?? regionIndex} | bbox: ${bbox}`;
+      regionHeadEl.appendChild(metaEl);
+      regionItemEl.appendChild(regionHeadEl);
+
+      if (region.content) {
+        const contentEl = document.createElement("p");
+        contentEl.className = "layout-region-content";
+        contentEl.textContent = truncateText(region.content, 220);
+        regionItemEl.appendChild(contentEl);
+      }
+
+      regionListEl.appendChild(regionItemEl);
+    });
+
+    pageCardEl.appendChild(regionListEl);
+    layoutPagesEl.appendChild(pageCardEl);
+  });
+
+  renderLayoutVisualizations(visualizations);
+  layoutWrapEl.classList.remove("hidden");
 }
 
 function buildPayload() {
@@ -621,6 +824,10 @@ async function runOCR() {
       jsonOutputEl.innerHTML = "";
     }
 
+    const layoutPages = normalizeLayoutPages(data.layout);
+    renderLayoutPanel(layoutPages, data.layout_visualizations);
+    renderLayoutOverlay(layoutPages);
+
     const warnings = (data.warnings || []).join(" | ");
     const backend = data.backend || String(payload.get("backend") || "direct");
     metaEl.textContent = `Backend: ${backend} | Modell: ${data.model} | Latenz: ${data.latency_ms} ms${warnings ? ` | Hinweise: ${warnings}` : ""}`;
@@ -751,6 +958,10 @@ fileEl.addEventListener("change", () => {
   setWorkspaceVisible(!!currentFile());
   updatePreview();
   void runOCR();
+});
+previewImageEl.addEventListener("load", () => {
+  const layoutPages = normalizeLayoutPages(lastResponse?.layout);
+  renderLayoutOverlay(layoutPages);
 });
 modeEl.addEventListener("change", () => {
   toggleModeDependentFields();

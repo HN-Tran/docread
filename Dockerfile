@@ -3,7 +3,17 @@ FROM python:3.13-slim AS base
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+ARG PYTORCH_CPU_INDEX_URL=https://download.pytorch.org/whl/cpu
+
 WORKDIR /app
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        git \
+        libgl1 \
+        libglib2.0-0 \
+        libgomp1 && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md ./
 COPY app ./app
@@ -14,6 +24,10 @@ COPY data ./data
 
 FROM base AS runtime
 RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    python -m pip install --no-cache-dir \
+        --index-url ${PYTORCH_CPU_INDEX_URL} \
+        --extra-index-url https://pypi.org/simple \
+        torch torchvision && \
     python -m pip install --no-cache-dir .
 EXPOSE 8000
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
@@ -21,6 +35,10 @@ CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "
 
 FROM base AS test
 RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    python -m pip install --no-cache-dir \
+        --index-url ${PYTORCH_CPU_INDEX_URL} \
+        --extra-index-url https://pypi.org/simple \
+        torch torchvision && \
     python -m pip install --no-cache-dir . && \
     python -m pip install --no-cache-dir pytest mypy ruff
 CMD ["pytest", "-q"]

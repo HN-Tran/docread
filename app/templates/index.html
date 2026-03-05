@@ -72,7 +72,12 @@
               <button id="change-file-btn" class="change-file-btn" type="button">Datei ändern</button>
             </div>
             <div id="preview-empty" class="preview-empty">Keine Datei ausgewählt.</div>
-            <img id="preview-image" class="preview-media hidden" alt="Vorschau der ausgewählten Datei" />
+            <div id="preview-image-stage" class="preview-media preview-image-stage hidden">
+              <div id="preview-image-frame" class="preview-image-frame">
+                <img id="preview-image" class="preview-image hidden" alt="Vorschau der ausgewählten Datei" />
+                <div id="preview-layout-overlay" class="preview-layout-overlay hidden"></div>
+              </div>
+            </div>
             <object id="preview-pdf" class="preview-media hidden" type="application/pdf"></object>
             <a id="preview-pdf-link" class="hidden" target="_blank" rel="noreferrer">PDF in neuem Tab öffnen</a>
           </div>
@@ -221,6 +226,14 @@
         <section id="structured-wrap" class="hidden">
           <h3>Strukturierte Nutzdaten</h3>
           <pre id="json-output"></pre>
+        </section>
+        <section id="layout-wrap" class="hidden">
+          <div class="layout-head">
+            <h3>Layout</h3>
+            <p id="layout-summary"></p>
+          </div>
+          <div id="layout-visualizations" class="layout-visualizations hidden"></div>
+          <div id="layout-pages"></div>
         </section>
         <div id="loading-overlay" class="loading-overlay" aria-live="polite">
           <span class="spinner" aria-hidden="true"></span>

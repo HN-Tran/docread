@@ -126,6 +126,8 @@ async def ocr(
     return {
         "text": result.text,
         "structured": result.structured,
+        "layout": result.layout,
+        "layout_visualizations": result.layout_visualizations,
         "model": result.model,
         "mode": result.mode,
         "schema_name": result.schema_name,

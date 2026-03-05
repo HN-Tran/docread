@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import base64
+import importlib
+import mimetypes
 import time
+from importlib.util import find_spec
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
 
-from app.services.ocr_pipeline import PLAIN_TASK_OCR_TEXT, OCRPipeline, OCRResult
+from app.services.ocr_pipeline import (
+    PLAIN_TASK_OCR_TEXT,
+    OCRPipeline,
+    OCRResult,
+    normalize_ocr_text_output,
+)
 from app.services.ollama_client import OllamaError
 
 _CONTENT_TYPE_SUFFIX_MAP = {
@@ -18,6 +27,12 @@ _CONTENT_TYPE_SUFFIX_MAP = {
     "image/webp": ".webp",
     "image/x-tiff": ".tif",
 }
+_LAYOUT_VISUALIZATION_KEYS = (
+    "_layout_visualization",
+    "layout_visualization",
+    "layout_visualizations",
+    "layout_visualization_paths",
+)
 
 
 class GLMOCRExpertPipeline:
@@ -41,16 +56,28 @@ class GLMOCRExpertPipeline:
         self.enable_layout = enable_layout
         self._parser_cache: dict[tuple[str, bool], Any] = {}
 
-    def _build_parser(self, *, model: str, enable_layout: bool) -> Any:
-        try:
-            from glmocr import GlmOcr
-        except ImportError as exc:
+    @staticmethod
+    def _load_glmocr_class() -> type[Any]:
+        if find_spec("glmocr") is None:
             raise OllamaError(
                 "Expert-Backend erfordert das Paket 'glmocr'. Bitte Abhängigkeit installieren."
-            ) from exc
+            )
 
         try:
-            return GlmOcr(
+            module = importlib.import_module("glmocr")
+            parser_class = module.GlmOcr
+        except Exception as exc:  # noqa: BLE001
+            raise OllamaError(
+                f"Expert-Backend konnte 'glmocr.GlmOcr' nicht laden: {type(exc).__name__}: {exc}"
+            ) from exc
+
+        return parser_class
+
+    def _build_parser(self, *, model: str, enable_layout: bool) -> Any:
+        parser_class = self._load_glmocr_class()
+
+        try:
+            return parser_class(
                 mode=self.mode,
                 model=model,
                 ocr_api_host=self.ocr_api_host,
@@ -71,26 +98,205 @@ class GLMOCRExpertPipeline:
 
     @staticmethod
     def _extract_markdown(parse_result: Any) -> str:
-        if isinstance(parse_result, dict):
-            markdown = parse_result.get("markdown_result", "")
-            return str(markdown).strip() if markdown is not None else ""
-
-        markdown = getattr(parse_result, "markdown_result", "")
+        markdown = GLMOCRExpertPipeline._get_result_value(parse_result, "markdown_result", "")
         if isinstance(markdown, str):
-            return markdown.strip()
+            return normalize_ocr_text_output(markdown)
         if markdown is None:
             return ""
-        return str(markdown).strip()
+        return normalize_ocr_text_output(str(markdown))
+
+    @staticmethod
+    def _get_result_value(parse_result: Any, key: str, default: Any = None) -> Any:
+        if isinstance(parse_result, dict):
+            return parse_result.get(key, default)
+        return getattr(parse_result, key, default)
 
     @staticmethod
     def _extract_error_message(parse_result: Any) -> str | None:
-        if isinstance(parse_result, dict):
-            error_message = parse_result.get("_error")
-            return str(error_message).strip() if error_message else None
-        error_message = getattr(parse_result, "_error", None)
+        error_message = GLMOCRExpertPipeline._get_result_value(parse_result, "_error")
         if error_message:
             return str(error_message).strip()
         return None
+
+    @staticmethod
+    def _normalize_layout_region(region: Any) -> dict[str, object] | None:
+        if not isinstance(region, dict):
+            return None
+
+        normalized_region: dict[str, object] = {}
+
+        index = region.get("index")
+        if index is not None:
+            try:
+                normalized_region["index"] = int(index)
+            except (TypeError, ValueError):
+                normalized_region["index"] = str(index)
+
+        label = region.get("label")
+        if label is not None and str(label).strip():
+            normalized_region["label"] = str(label).strip()
+
+        content = region.get("content")
+        if content is not None and str(content).strip():
+            normalized_region["content"] = str(content).strip()
+
+        bbox = region.get("bbox_2d")
+        if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+            try:
+                normalized_region["bbox_2d"] = [float(value) for value in bbox]
+            except (TypeError, ValueError):
+                pass
+
+        if not normalized_region:
+            return None
+        return normalized_region
+
+    @classmethod
+    def _extract_layout(cls, parse_result: Any) -> list[dict[str, object]] | None:
+        raw_layout = cls._get_result_value(parse_result, "json_result")
+        if raw_layout is None:
+            return None
+
+        if isinstance(raw_layout, dict):
+            candidate_pages = raw_layout.get("pages") or raw_layout.get("layout")
+        else:
+            candidate_pages = raw_layout
+
+        if not isinstance(candidate_pages, list):
+            return None
+
+        pages: list[dict[str, object]] = []
+        for page_index, page in enumerate(candidate_pages, start=1):
+            raw_regions: Any
+            page_number = page_index
+            if isinstance(page, dict):
+                raw_regions = page.get("regions")
+                raw_page_number = page.get("page_number") or page.get("page") or page_index
+                try:
+                    page_number = int(raw_page_number)
+                except (TypeError, ValueError):
+                    page_number = page_index
+            else:
+                raw_regions = page
+
+            if not isinstance(raw_regions, list):
+                continue
+
+            regions = [
+                normalized_region
+                for region in raw_regions
+                if (normalized_region := cls._normalize_layout_region(region)) is not None
+            ]
+            pages.append({"page_number": page_number, "regions": regions})
+
+        return pages or None
+
+    @staticmethod
+    def _path_to_data_url(path: Path) -> str | None:
+        if not path.is_file():
+            return None
+
+        mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        if not mime_type.startswith("image/"):
+            return None
+
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        return f"data:{mime_type};base64,{encoded}"
+
+    @classmethod
+    def _normalize_layout_visualization_value(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+
+        if isinstance(value, dict):
+            urls: list[str] = []
+            for key in ("path", "paths", "url", "urls", "src", "image"):
+                urls.extend(cls._normalize_layout_visualization_value(value.get(key)))
+            return urls
+
+        if isinstance(value, (list, tuple, set)):
+            urls: list[str] = []
+            for item in value:
+                urls.extend(cls._normalize_layout_visualization_value(item))
+            return urls
+
+        if isinstance(value, (bytes, bytearray)):
+            encoded = base64.b64encode(bytes(value)).decode("ascii")
+            return [f"data:image/png;base64,{encoded}"]
+
+        if isinstance(value, Path):
+            data_url = cls._path_to_data_url(value)
+            return [data_url] if data_url else []
+
+        if isinstance(value, str):
+            stripped_value = value.strip()
+            if not stripped_value:
+                return []
+            if stripped_value.startswith(("data:image/", "http://", "https://")):
+                return [stripped_value]
+
+            data_url = cls._path_to_data_url(Path(stripped_value))
+            return [data_url] if data_url else []
+
+        return []
+
+    @classmethod
+    def _extract_layout_visualizations(cls, parse_result: Any) -> list[str] | None:
+        visualizations: list[str] = []
+        seen: set[str] = set()
+
+        for key in _LAYOUT_VISUALIZATION_KEYS:
+            for item in cls._normalize_layout_visualization_value(
+                cls._get_result_value(parse_result, key)
+            ):
+                if item not in seen:
+                    seen.add(item)
+                    visualizations.append(item)
+
+        raw_mapping = (
+            parse_result
+            if isinstance(parse_result, dict)
+            else getattr(parse_result, "__dict__", {})
+        )
+        if isinstance(raw_mapping, dict):
+            for key, value in raw_mapping.items():
+                lowered_key = str(key).lower()
+                if "layout" not in lowered_key or "visual" not in lowered_key:
+                    continue
+                for item in cls._normalize_layout_visualization_value(value):
+                    if item not in seen:
+                        seen.add(item)
+                        visualizations.append(item)
+
+        return visualizations or None
+
+    @staticmethod
+    def _build_text_from_layout(layout: list[dict[str, object]] | None) -> str:
+        if not layout:
+            return ""
+
+        page_texts: list[str] = []
+        for page_index, page in enumerate(layout, start=1):
+            regions = page.get("regions")
+            if not isinstance(regions, list):
+                continue
+
+            region_texts = [
+                str(region.get("content", "")).strip()
+                for region in regions
+                if isinstance(region, dict) and str(region.get("content", "")).strip()
+            ]
+            if not region_texts:
+                continue
+
+            page_text = "\n".join(region_texts)
+            if len(layout) > 1:
+                page_number = page.get("page_number") or page_index
+                page_texts.append(f"--- Seite {page_number} ---\n{page_text}")
+            else:
+                page_texts.append(page_text)
+
+        return "\n\n".join(page_texts).strip()
 
     async def _fallback_to_direct(
         self,
@@ -205,14 +411,25 @@ class GLMOCRExpertPipeline:
             parse_result = parser.parse(
                 str(temp_path),
                 save_results=False,
-                save_layout_visualization=False,
+                save_layout_visualization=selected_enable_layout,
             )
 
+            layout = self._extract_layout(parse_result)
             text = self._extract_markdown(parse_result)
+            layout_visualizations = (
+                self._extract_layout_visualizations(parse_result)
+                if selected_enable_layout
+                else None
+            )
+            warnings: list[str] = []
+            if not text:
+                text = self._build_text_from_layout(layout)
+                if text:
+                    warnings.append(
+                        "Leere Markdown-Hülle entfernt; Text aus Layout-Regionen rekonstruiert."
+                    )
             if not text:
                 raise OllamaError("Expert-Backend hat keinen OCR-Text zurückgegeben")
-
-            warnings: list[str] = []
             error_message = self._extract_error_message(parse_result)
             if error_message:
                 warnings.append(f"Expert-Backend Hinweis: {error_message}")
@@ -220,6 +437,19 @@ class GLMOCRExpertPipeline:
                 warnings.append("token_limit wird vom Expert-Backend nicht verwendet.")
             if gif_max_frames is not None:
                 warnings.append("gif_max_frames ist nur für GIF-Verarbeitung relevant.")
+            if layout:
+                region_count = sum(len(page.get("regions", [])) for page in layout)
+                warnings.append(
+                    f"Expert-Layout: {region_count} Regionen auf {len(layout)} Seite(n) erkannt."
+                )
+            elif selected_enable_layout:
+                warnings.append(
+                    "Expert-Layout war aktiviert, aber GLM-OCR hat keine Layout-Regionen geliefert."
+                )
+            if layout_visualizations:
+                warnings.append(
+                    f"Expert-Layout-Visualisierung: {len(layout_visualizations)} Ansicht(en) verfügbar."
+                )
             warnings.append(
                 f"Expert-Backend wurde mit enable_layout={str(selected_enable_layout).lower()} ausgeführt."
             )
@@ -233,6 +463,8 @@ class GLMOCRExpertPipeline:
                 schema_name=None,
                 latency_ms=latency_ms,
                 warnings=warnings,
+                layout=layout,
+                layout_visualizations=layout_visualizations,
             )
         except OllamaError:
             raise

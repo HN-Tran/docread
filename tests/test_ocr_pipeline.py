@@ -259,6 +259,47 @@ def test_plain_ocr_text_retries_when_output_looks_like_image_description() -> No
     assert "Bildbeschreibung statt OCR-Text" in " | ".join(result.warnings)
 
 
+def test_plain_ocr_text_retries_when_output_is_empty_markdown_wrapper() -> None:
+    fake_client = FakeOllamaClient(
+        responses=[
+            "```markdown\n\n```",
+            "RECHNUNG\nINV-2026-004\nGesamt: 199,00 EUR",
+        ]
+    )
+    pipeline = _pipeline(fake_client)
+    result = asyncio.run(
+        pipeline.run(
+            image_bytes=_png_bytes(),
+            mode="plain",
+            schema_name=None,
+            task="ocr_text",
+            custom_prompt=None,
+        )
+    )
+    assert result.text == "RECHNUNG\nINV-2026-004\nGesamt: 199,00 EUR"
+    assert len(fake_client.prompts) == 2
+    assert "Leere Markdown-Hülle erkannt" in " | ".join(result.warnings)
+
+
+def test_plain_extract_table_markdown_unwraps_markdown_code_fence() -> None:
+    fake_client = FakeOllamaClient(
+        responses=[
+            "```markdown\n| Artikel | Preis |\n| --- | --- |\n| A | 10,00 |\n```",
+        ]
+    )
+    pipeline = _pipeline(fake_client)
+    result = asyncio.run(
+        pipeline.run(
+            image_bytes=_png_bytes(),
+            mode="plain",
+            schema_name=None,
+            task="extract_table_markdown",
+            custom_prompt=None,
+        )
+    )
+    assert result.text == "| Artikel | Preis |\n| --- | --- |\n| A | 10,00 |"
+
+
 def test_plain_ocr_text_recovers_from_instruction_fragment_echo() -> None:
     fake_client = FakeOllamaClient(
         responses=[

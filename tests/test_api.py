@@ -84,6 +84,26 @@ class FakeBackendRouter:
             {
                 "text": "hello world",
                 "structured": {"vendor": "ACME"} if mode == "structured" else None,
+                "layout": (
+                    [
+                        {
+                            "page_number": 1,
+                            "regions": [
+                                {
+                                    "index": 0,
+                                    "label": "text_block",
+                                    "content": "hello world",
+                                    "bbox_2d": [100.0, 120.0, 900.0, 260.0],
+                                }
+                            ],
+                        }
+                    ]
+                    if selected_backend == "expert"
+                    else None
+                ),
+                "layout_visualizations": (
+                    ["data:image/png;base64,ZmFrZQ=="] if selected_backend == "expert" else None
+                ),
                 "model": model or "fake-model",
                 "mode": mode,
                 "schema_name": schema_name,
@@ -145,6 +165,8 @@ def test_ocr_plain() -> None:
     )
     assert response["text"] == "hello world"
     assert response["structured"] is None
+    assert response["layout"] is None
+    assert response["layout_visualizations"] is None
 
 
 def test_ocr_structured_requires_schema() -> None:
@@ -299,6 +321,20 @@ def test_ocr_forwards_backend_choice() -> None:
     )
     assert fake_pipeline.last_call["backend"] == "expert"
     assert response["backend"] == "expert"
+    assert response["layout"] == [
+        {
+            "page_number": 1,
+            "regions": [
+                {
+                    "index": 0,
+                    "label": "text_block",
+                    "content": "hello world",
+                    "bbox_2d": [100.0, 120.0, 900.0, 260.0],
+                }
+            ],
+        }
+    ]
+    assert response["layout_visualizations"] == ["data:image/png;base64,ZmFrZQ=="]
 
 
 def test_ocr_forwards_expert_enable_layout() -> None:
