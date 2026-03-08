@@ -156,6 +156,19 @@ def _bbox_to_polygon(value: object) -> list[float] | None:
     return [x1, y1, x2, y1, x2, y2, x1, y2]
 
 
+def _bbox_to_rect(value: object) -> tuple[float, float, float, float] | None:
+    if not isinstance(value, list) or len(value) != 4:
+        return None
+    if not all(isinstance(point, (int, float)) for point in value):
+        return None
+    x1, y1, x2, y2 = [float(point) for point in value]
+    return x1, y1, x2, y2
+
+
+def _rect_to_polygon(*, x1: float, y1: float, x2: float, y2: float) -> list[float]:
+    return [x1, y1, x2, y1, x2, y2, x1, y2]
+
+
 def _split_page_paragraphs(page_text: str) -> list[str]:
     normalized = page_text.strip()
     if not normalized:
@@ -266,8 +279,12 @@ def _build_line_and_word_entries(
             region_content = str(region.get("content") or "").strip()
             if not region_content:
                 continue
+            region_rect = _bbox_to_rect(region.get("bbox_2d"))
             polygon = _bbox_to_polygon(region.get("bbox_2d"))
-            for segment in [line.strip() for line in region_content.splitlines() if line.strip()] or [region_content]:
+            segments = [line.strip() for line in region_content.splitlines() if line.strip()] or [
+                region_content
+            ]
+            for segment in segments:
                 line_span, search_cursor = _locate_span_in_page_content(
                     page_content=page_content,
                     fragment=segment,
@@ -281,19 +298,30 @@ def _build_line_and_word_entries(
                 lines.append(line_entry)
                 for word_match in _WORD_RE.finditer(segment):
                     word_content = word_match.group(0)
-                    words.append(
-                        {
-                            "content": word_content,
-                            "span": _make_span(
-                                offset=line_span["offset"]
-                                + _string_unit_length(
-                                    segment[: word_match.start()], string_index_type
-                                ),
-                                text=word_content,
-                                string_index_type=string_index_type,
+                    word_entry: dict[str, object] = {
+                        "content": word_content,
+                        "span": _make_span(
+                            offset=line_span["offset"]
+                            + _string_unit_length(
+                                segment[: word_match.start()], string_index_type
                             ),
-                        }
-                    )
+                            text=word_content,
+                            string_index_type=string_index_type,
+                        ),
+                    }
+                    if region_rect is not None:
+                        x1, y1, x2, y2 = region_rect
+                        line_width = max(x2 - x1, 0.0)
+                        segment_length = max(len(segment), 1)
+                        word_x1 = x1 + (line_width * word_match.start() / segment_length)
+                        word_x2 = x1 + (line_width * word_match.end() / segment_length)
+                        word_entry["polygon"] = _rect_to_polygon(
+                            x1=word_x1,
+                            y1=y1,
+                            x2=word_x2,
+                            y2=y2,
+                        )
+                    words.append(word_entry)
         return lines, words
 
     for segment in [line.strip() for line in page_content.splitlines() if line.strip()]:

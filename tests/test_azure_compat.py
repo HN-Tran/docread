@@ -215,10 +215,12 @@ def test_sync_analyze_returns_azure_shape_and_filters_pages() -> None:
                 {
                     "content": "page",
                     "span": {"offset": 0, "length": 4},
+                    "polygon": [10.0, 10.0, 30.0, 10.0, 30.0, 50.0, 10.0, 50.0],
                 },
                 {
                     "content": "two",
                     "span": {"offset": 5, "length": 3},
+                    "polygon": [35.0, 10.0, 50.0, 10.0, 50.0, 50.0, 35.0, 50.0],
                 },
             ],
             "lines": [
