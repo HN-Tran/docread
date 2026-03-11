@@ -218,16 +218,19 @@ def test_ocr_plain() -> None:
                 {
                     "content": "hello",
                     "span": {"offset": 0, "length": 5},
+                    "polygon": None,
                 },
                 {
                     "content": "world",
                     "span": {"offset": 6, "length": 5},
+                    "polygon": None,
                 },
             ],
             "lines": [
                 {
                     "content": "hello world",
                     "spans": [{"offset": 0, "length": 11}],
+                    "polygon": None,
                 }
             ],
             "spans": [{"offset": 0, "length": 11}],

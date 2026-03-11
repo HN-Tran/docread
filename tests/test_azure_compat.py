@@ -156,6 +156,39 @@ class FakeBackendRouter:
         return result, "direct"
 
 
+class FakeBackendRouterWithoutLayout(FakeBackendRouter):
+    async def run(
+        self,
+        *,
+        backend: str | None,
+        image_bytes: bytes,
+        content_type: str | None,
+        mode: str,
+        schema_name: str | None,
+        model: str | None,
+        task: str | None,
+        custom_prompt: str | None,
+        token_limit: int | None,
+        gif_max_frames: int | None,
+        expert_enable_layout: bool | None,
+    ) -> Any:
+        result, selected_backend = await super().run(
+            backend=backend,
+            image_bytes=image_bytes,
+            content_type=content_type,
+            mode=mode,
+            schema_name=schema_name,
+            model=model,
+            task=task,
+            custom_prompt=custom_prompt,
+            token_limit=token_limit,
+            gif_max_frames=gif_max_frames,
+            expert_enable_layout=expert_enable_layout,
+        )
+        result.layout = None
+        return result, selected_backend
+
+
 def _pipeline() -> OCRBackendRouter:
     return cast(OCRBackendRouter, FakeBackendRouter())
 
@@ -245,6 +278,54 @@ def test_sync_analyze_returns_azure_shape_and_filters_pages() -> None:
                     "polygon": [10.0, 10.0, 50.0, 10.0, 50.0, 50.0, 10.0, 50.0],
                 }
             ],
+        }
+    ]
+
+
+def test_sync_analyze_without_layout_keeps_word_polygon_key() -> None:
+    fake_pipeline = FakeBackendRouterWithoutLayout()
+    response = asyncio.run(
+        compat_sync_analyze(
+            request=_request(body=_png_bytes(), content_type="application/octet-stream"),
+            modelId="prebuilt-read",
+            api_version="2022-08-31",
+            pages="1",
+            locale=None,
+            string_index_type="textElements",
+            pipeline=cast(OCRBackendRouter, fake_pipeline),
+        )
+    )
+    payload = json.loads(response.body.decode("utf-8"))
+
+    assert payload["analyzeResult"]["pages"] == [
+        {
+            "pageNumber": 1,
+            "angle": 0.0,
+            "width": 1000,
+            "height": 1200,
+            "unit": "pixel",
+            "words": [
+                {
+                    "content": "page",
+                    "span": {"offset": 0, "length": 4},
+                    "polygon": None,
+                },
+                {
+                    "content": "one",
+                    "span": {"offset": 5, "length": 3},
+                    "polygon": None,
+                },
+            ],
+            "lines": [
+                {
+                    "content": "page one",
+                    "spans": [{"offset": 0, "length": 8}],
+                    "polygon": None,
+                }
+            ],
+            "spans": [{"offset": 0, "length": 8}],
+            "kind": "document",
+            "content": "page one",
         }
     ]
 
