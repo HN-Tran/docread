@@ -292,9 +292,11 @@ def _build_line_and_word_entries(
                     string_index_type=string_index_type,
                     search_cursor=search_cursor,
                 )
-                line_entry: dict[str, object] = {"content": segment, "spans": [line_span]}
-                if polygon is not None:
-                    line_entry["polygon"] = polygon
+                line_entry: dict[str, object] = {
+                    "content": segment,
+                    "spans": [line_span],
+                    "polygon": polygon,
+                }
                 lines.append(line_entry)
                 for word_match in _WORD_RE.finditer(segment):
                     word_content = word_match.group(0)
@@ -308,6 +310,7 @@ def _build_line_and_word_entries(
                             text=word_content,
                             string_index_type=string_index_type,
                         ),
+                        "polygon": None,
                     }
                     if region_rect is not None:
                         x1, y1, x2, y2 = region_rect
@@ -332,7 +335,7 @@ def _build_line_and_word_entries(
             string_index_type=string_index_type,
             search_cursor=search_cursor,
         )
-        lines.append({"content": segment, "spans": [line_span]})
+        lines.append({"content": segment, "spans": [line_span], "polygon": None})
         for word_match in _WORD_RE.finditer(segment):
             word_content = word_match.group(0)
             words.append(
@@ -344,6 +347,7 @@ def _build_line_and_word_entries(
                         text=word_content,
                         string_index_type=string_index_type,
                     ),
+                    "polygon": None,
                 }
             )
     return lines, words
