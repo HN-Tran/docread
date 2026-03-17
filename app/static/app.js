@@ -166,6 +166,11 @@ function setAdvancedOpen(isOpen) {
 
 function setLoading(isLoading) {
   loadingOverlayEl.classList.toggle("is-active", isLoading);
+  if (isLoading) {
+    applyOptionsBtnEl.disabled = true;
+  } else {
+    applyOptionsBtnEl.disabled = !hasPendingAdvancedChanges;
+  }
 }
 
 function setAdvancedDirty(isDirty) {
