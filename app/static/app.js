@@ -166,9 +166,10 @@ function setAdvancedOpen(isOpen) {
 
 function setLoading(isLoading) {
   loadingOverlayEl.classList.toggle("is-active", isLoading);
-  if (isLoading) {
-    applyOptionsBtnEl.disabled = true;
-  } else {
+  for (const el of advancedPanelEl.querySelectorAll("input, select, button")) {
+    el.disabled = isLoading;
+  }
+  if (!isLoading) {
     applyOptionsBtnEl.disabled = !hasPendingAdvancedChanges;
   }
 }
