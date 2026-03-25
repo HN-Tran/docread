@@ -9,7 +9,7 @@ services:
       APP_BASE_PATH: ${APP_BASE_PATH:-}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-glm-ocr:latest}
-      OCR_BACKEND: ${OCR_BACKEND:-direct}
+      OCR_BACKEND: ${OCR_BACKEND:-expert}
       OCR_EXPERT_MODE: ${OCR_EXPERT_MODE:-selfhosted}
       OCR_EXPERT_ENABLE_LAYOUT: ${OCR_EXPERT_ENABLE_LAYOUT:-true}
       OCR_EXPERT_LAYOUT_MODEL: ${OCR_EXPERT_LAYOUT_MODEL:-PaddlePaddle/PP-DocLayoutV3_safetensors}

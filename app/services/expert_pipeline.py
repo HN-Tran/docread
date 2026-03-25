@@ -1188,20 +1188,29 @@ class GLMOCRExpertPipeline:
         row_map = _build_index_map(det_row_count, ocr_row_count)
         col_map = _build_index_map(det_col_count, ocr_col_count)
 
-        for cell in cells:
+        # Map detector indices to OCR indices and deduplicate.
+        seen: set[tuple[int, int]] = set()
+        to_remove: list[int] = []
+        for i, cell in enumerate(cells):
             row_idx = cell.get("row", -1)
             col_idx = cell.get("column", -1)
             if not isinstance(row_idx, int) or not isinstance(col_idx, int):
                 continue
             mapped_row = row_map.get(row_idx, row_idx)
             mapped_col = col_map.get(col_idx, col_idx)
-            # Update indices so downstream consumers see the corrected grid.
+            key = (mapped_row, mapped_col)
+            if key in seen:
+                to_remove.append(i)
+                continue
+            seen.add(key)
             cell["row"] = mapped_row
             cell["column"] = mapped_col
             if 0 <= mapped_row < len(parsed_rows):
                 row_cells = parsed_rows[mapped_row]
                 if 0 <= mapped_col < len(row_cells):
                     cell["content"] = row_cells[mapped_col]
+        for i in reversed(to_remove):
+            cells.pop(i)
 
     def _enrich_table_regions(
         self,

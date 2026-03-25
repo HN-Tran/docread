@@ -1358,13 +1358,13 @@ async function runOCR() {
   }
   const controller = new AbortController();
   activeRequestController = controller;
+  const payload = buildPayload();
   setLoading(true);
   clearOutput();
   setWorkspaceVisible(true);
   metaEl.textContent = "OCR wird ausgeführt...";
 
   try {
-    const payload = buildPayload();
     const requestMode = String(payload.get("mode") || "plain");
     const requestTask = String(payload.get("task") || "");
     const response = await fetch(ocrEndpoint, {
