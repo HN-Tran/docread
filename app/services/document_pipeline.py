@@ -348,16 +348,21 @@ class DocumentPipeline:
                 except OllamaError as exc:
                     warnings.append(f"Region {idx} ({label}) Tabellen-OCR fehlgeschlagen: {exc}")
                     table_html = ""
-                if table_html:
-                    parsed_rows = _parse_table_html(table_html)
-                    if parsed_rows:
-                        cells = _build_table_cells(
-                            parsed_rows, region.get("bbox_2d", [0, 0, 0, 0])
-                        )
-                        layout_region["cells"] = cells
+                parsed_rows = _parse_table_html(table_html) if table_html else []
+                if parsed_rows:
+                    layout_region["cells"] = _build_table_cells(
+                        parsed_rows, region.get("bbox_2d", [0, 0, 0, 0])
+                    )
                     layout_region["content"] = _strip_table_markup(table_html)
                 else:
-                    layout_region["content"] = ""
+                    # No table structure found — fall back to plain OCR for this region.
+                    try:
+                        layout_region["content"] = await self._ocr_text_region(
+                            image, region, model=model
+                        )
+                    except OllamaError as exc:
+                        warnings.append(f"Region {idx} ({label}) OCR fehlgeschlagen: {exc}")
+                        layout_region["content"] = ""
             elif task_type == "skip":
                 layout_region["content"] = ""
             else:
