@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import re
@@ -134,13 +135,25 @@ class OCRResult:
     page_images: list[str] | None = None
 
 
-def encode_page_images(page_bytes_list: list[bytes], quality: int = 75) -> list[str]:
-    """Convert a list of PNG page bytes to JPEG base64 data URLs for preview."""
+PREVIEW_MAX_DIM = 1600
+
+
+def encode_page_images(page_bytes_list: list[bytes], quality: int = 70) -> list[str]:
+    """Convert a list of PNG page bytes to JPEG base64 data URLs for preview.
+
+    Downscales to ``PREVIEW_MAX_DIM`` on the longest side and skips
+    ``optimize=True`` to keep CPU time bounded for multi-page documents.
+    """
     result: list[str] = []
     for png_bytes in page_bytes_list:
         img = Image.open(BytesIO(png_bytes)).convert("RGB")
+        longest = max(img.width, img.height)
+        if longest > PREVIEW_MAX_DIM:
+            ratio = PREVIEW_MAX_DIM / longest
+            new_size = (max(1, int(img.width * ratio)), max(1, int(img.height * ratio)))
+            img = img.resize(new_size, Image.Resampling.LANCZOS)
         buf = BytesIO()
-        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        img.save(buf, format="JPEG", quality=quality)
         b64 = base64.b64encode(buf.getvalue()).decode("ascii")
         result.append(f"data:image/jpeg;base64,{b64}")
     return result
@@ -969,5 +982,9 @@ class OCRPipeline:
             warnings=warnings,
             page_infos=response_page_infos,
             page_texts=response_page_texts,
-            page_images=encode_page_images(raw_page_images) if raw_page_images else None,
+            page_images=(
+                await asyncio.to_thread(encode_page_images, raw_page_images)
+                if raw_page_images
+                else None
+            ),
         )
