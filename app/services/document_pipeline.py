@@ -8,6 +8,7 @@ Table Transformer for precise cell bounding boxes.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import re
@@ -864,7 +865,11 @@ class DocumentPipeline:
             page_infos=page_infos,
             page_texts=all_page_texts,
             markdown=text,
-            page_images=encode_page_images(raw_page_images) if raw_page_images else None,
+            page_images=(
+                await asyncio.to_thread(encode_page_images, raw_page_images)
+                if raw_page_images
+                else None
+            ),
         )
 
     async def _fallback(
