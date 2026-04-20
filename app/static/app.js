@@ -182,9 +182,17 @@ function setAdvancedOpen(isOpen) {
 
 function setLoading(isLoading) {
   loadingOverlayEl.classList.toggle("is-active", isLoading);
-  for (const el of advancedPanelEl.querySelectorAll("input, select, button")) {
+  document.body.classList.toggle("is-loading", isLoading);
+  const disableables = document.querySelectorAll(
+    "#ocr-form input, #ocr-form select, #ocr-form button, " +
+    "#advanced-panel input, #advanced-panel select, #advanced-panel button, " +
+    "#compare-form input, #compare-form button, " +
+    ".result-view-btn, #word-toggle-btn, #page-selector, " +
+    "#pick-file-btn, #change-file-btn, #copy-btn, #download-btn, #download-csv-btn"
+  );
+  disableables.forEach((el) => {
     el.disabled = isLoading;
-  }
+  });
   if (!isLoading) {
     applyOptionsBtnEl.disabled = !hasPendingAdvancedChanges;
   }
@@ -385,6 +393,8 @@ function showPageImage(index) {
   previewEmptyEl.classList.add("hidden");
   const layoutPages = normalizeLayoutPages(lastResponse?.layout);
   renderLayoutOverlay(layoutPages, index);
+  renderLayoutPanel(layoutPages, lastResponse?.layout_visualizations, index);
+  wordToggleBtnEl.setAttribute("aria-pressed", "false");
 }
 
 function clearLayoutOverlay() {
@@ -392,13 +402,17 @@ function clearLayoutOverlay() {
   previewLayoutOverlayEl.classList.add("hidden");
 }
 
-function clearLayoutDisplay() {
-  clearLayoutOverlay();
+function clearLayoutSidebar() {
   layoutSummaryEl.textContent = "";
   layoutPagesEl.innerHTML = "";
   layoutVisualizationsEl.innerHTML = "";
   layoutVisualizationsEl.classList.add("hidden");
   layoutWrapEl.classList.add("hidden");
+}
+
+function clearLayoutDisplay() {
+  clearLayoutOverlay();
+  clearLayoutSidebar();
 }
 
 function clearResultViewSwitch() {
@@ -858,9 +872,13 @@ function applyWordMode(active, layoutPages) {
     const existing = previewLayoutOverlayEl.querySelector(".preview-word-svg");
     if (existing) existing.remove();
 
-    // Restore region sidebar
     const lp = layoutPages || normalizeLayoutPages(lastResponse?.layout);
-    renderLayoutPanel(lp, lastResponse?.layout_visualizations);
+    renderLayoutPanel(lp, lastResponse?.layout_visualizations, currentPageIndex);
+    if (layoutBoxEls.length === 0 && lp.length > 0) {
+      renderLayoutOverlay(lp, currentPageIndex);
+    } else {
+      previewLayoutOverlayEl.classList.remove("hidden");
+    }
   }
 }
 
@@ -897,7 +915,7 @@ function renderDiffOverlay(diff) {
     const points = normalizedPolygonToPercentages(word.polygon);
     if (!points) return;
     const el = document.createElementNS(svgNs, "polygon");
-    el.classList.add(cssClass);
+    cssClass.split(/\s+/).filter(Boolean).forEach((cls) => el.classList.add(cls));
     el.setAttribute("points", points.map((p) => `${p.x},${p.y}`).join(" "));
     if (pairKey) el.setAttribute("data-pair-key", pairKey);
     const titleEl = document.createElementNS(svgNs, "title");
@@ -1030,20 +1048,33 @@ function renderLayoutVisualizations(visualizations) {
   layoutVisualizationsEl.classList.remove("hidden");
 }
 
-function renderLayoutPanel(layoutPages, visualizations) {
-  clearLayoutDisplay();
+function renderLayoutPanel(layoutPages, visualizations, activePageIndex = null) {
+  clearLayoutSidebar();
   if (layoutPages.length === 0 && (!Array.isArray(visualizations) || visualizations.length === 0)) {
     return;
   }
 
-  const regionCount = layoutPages.reduce(
-    (total, page) => total + (Array.isArray(page.regions) ? page.regions.length : 0),
+  const activeIndex = activePageIndex != null
+    ? Math.max(0, Math.min(activePageIndex, layoutPages.length - 1))
+    : currentPageIndex;
+  const visiblePages = layoutPages.length > 0
+    ? [{ page: layoutPages[activeIndex] || layoutPages[0], pageIndex: activeIndex }]
+    : [];
+
+  const regionCount = visiblePages.reduce(
+    (total, entry) => total + (Array.isArray(entry.page?.regions) ? entry.page.regions.length : 0),
     0
   );
-  const confidenceStats = collectLayoutConfidenceStats(layoutPages);
+  const confidenceStats = collectLayoutConfidenceStats(
+    visiblePages.map((entry) => entry.page)
+  );
   const summaryParts = [];
   if (layoutPages.length > 0) {
-    summaryParts.push(`${layoutPages.length} Seite(n)`);
+    summaryParts.push(
+      layoutPages.length > 1
+        ? `Seite ${activeIndex + 1}/${layoutPages.length}`
+        : `${layoutPages.length} Seite`
+    );
     summaryParts.push(`${regionCount} Region(en)`);
   }
   if (confidenceStats) {
@@ -1059,7 +1090,7 @@ function renderLayoutPanel(layoutPages, visualizations) {
   }
   layoutSummaryEl.textContent = summaryParts.join(" | ");
 
-  layoutPages.forEach((page, pageIndex) => {
+  visiblePages.forEach(({ page, pageIndex }) => {
     const pageCardEl = document.createElement("article");
     pageCardEl.className = "layout-page-card";
 
@@ -1773,7 +1804,6 @@ async function runOCR() {
       renderMarkdownPreview(markdownPreview);
       renderTablePreview(tableMatrices);
       const layoutPages = normalizeLayoutPages(data.layout);
-      renderLayoutPanel(layoutPages, data.layout_visualizations);
 
       // PDF page images: show rendered pages as preview
       pageImageDataUrls = data.page_images || [];
@@ -1784,6 +1814,7 @@ async function runOCR() {
       } else {
         pageSelectorWrapEl.classList.add("hidden");
         renderLayoutOverlay(layoutPages, 0);
+        renderLayoutPanel(layoutPages, data.layout_visualizations, 0);
       }
 
       // Reset word toggle and diff overlay on new result

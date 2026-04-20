@@ -1356,23 +1356,43 @@ pre {
 }
 
 .loading-overlay {
-  position: absolute;
+  position: fixed;
   inset: 0;
+  z-index: 9999;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.6rem;
-  border-radius: 12px;
   opacity: 0;
   pointer-events: none;
-  background: color-mix(in srgb, var(--panel) 80%, transparent);
-  backdrop-filter: blur(2px);
+  background: color-mix(in srgb, var(--bg) 70%, rgba(0, 0, 0, 0.35));
+  backdrop-filter: blur(3px);
   transition: opacity 0.22s ease;
 }
 
 .loading-overlay.is-active {
   opacity: 1;
   pointer-events: auto;
+}
+
+.loading-overlay-card {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.9rem 1.3rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+
+body.is-loading {
+  cursor: progress;
+}
+body.is-loading main,
+body.is-loading .global-drop-overlay {
+  pointer-events: none;
 }
 
 .spinner {
