@@ -298,7 +298,7 @@
             data-result-view="markdown"
             aria-pressed="false"
           >
-            Markdown
+            Text
           </button>
           <button
             id="result-view-diff-btn"
@@ -320,7 +320,7 @@
           <div id="layout-pages"></div>
         </section>
         <section id="markdown-preview-wrap" class="hidden">
-          <h3>Markdown-Vorschau</h3>
+          <h3>Text</h3>
           <div id="markdown-preview" class="markdown-preview"></div>
         </section>
         <section id="diff-wrap" class="hidden">
@@ -386,12 +386,14 @@
             Entscheidung, welche korrekt ist, liegt bei dir.
           </p>
         </section>
-        <div id="loading-overlay" class="loading-overlay" aria-live="polite">
-          <span class="spinner" aria-hidden="true"></span>
-          <span>OCR wird ausgeführt...</span>
-        </div>
       </section>
     </main>
+    <div id="loading-overlay" class="loading-overlay" aria-live="polite" role="status">
+      <div class="loading-overlay-card">
+        <span class="spinner" aria-hidden="true"></span>
+        <span>OCR wird ausgeführt – bitte warten…</span>
+      </div>
+    </div>
     <div id="global-drop-overlay" class="global-drop-overlay" aria-hidden="true">
       <div class="global-drop-card">Datei ablegen, um OCR zu starten</div>
     </div>
