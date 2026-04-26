@@ -295,66 +295,68 @@ def _assign_word_content(
     word_polys: list[dict[str, Any]],
     regions: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Assign text content to word polygons.
+    """Assign text content to detected word polygons.
 
-    If a word polygon already has content from the detector (e.g. DocTR/PaddleOCR
-    recognition), keep it as-is.  For polygons without content, fall back to
-    assigning tokens from the containing layout region's OCR text in reading order.
+    The detector (DocTR / PaddleOCR) is treated as the source of truth for
+    where the words are; its per-word recognition is preserved as fallback
+    text. Per-region OCR tokens are mapped onto the polygons in reading
+    order — one token per polygon — and override the detector text where
+    they cover. Polygons past the end of the region's token list keep the
+    detector text, so cells whose per-region OCR was incomplete (common
+    for tables where Ollama on the cropped image misses values) still
+    surface with DocTR's reading instead of being blanked.
     """
     result: list[dict[str, Any]] = [dict(wp) for wp in word_polys]
 
-    # If all polygons already carry detector-recognised content, nothing to do.
-    needs_assignment = [i for i, wp in enumerate(word_polys) if not wp.get("content")]
-    if not needs_assignment:
-        return result
-
-    # Group unassigned polygon indices by the region whose bbox most tightly contains them.
+    # Group all polygon indices by the smallest containing region (by bbox).
+    # We always run assignment so layout-region tokens override detector
+    # text where they cover the polygon.
     region_poly_indices: dict[int, list[int]] = {}
-    for poly_idx in needs_assignment:
-        wp = word_polys[poly_idx]
-        poly = wp["polygon"]
+    for poly_idx, wp in enumerate(word_polys):
+        poly = wp.get("polygon") or []
         if not poly or len(poly) < 8:
             continue
-            
+
         x_c = poly[0::2]
         y_c = poly[1::2]
         px1, px2 = min(x_c), max(x_c)
         py1, py2 = min(y_c), max(y_c)
         word_area = max(1.0, (px2 - px1) * (py2 - py1))
-        
+
         best: int | None = None
         best_area = float("inf")
-        
+
         for r_idx, region in enumerate(regions):
             bbox = region.get("bbox_2d") or []
             if len(bbox) != 4:
                 continue
             rx1, ry1, rx2, ry2 = bbox
-            
+
             ix1 = max(px1, rx1)
             iy1 = max(py1, ry1)
             ix2 = min(px2, rx2)
             iy2 = min(py2, ry2)
-            
+
             if ix1 < ix2 and iy1 < iy2:
                 intersection = (ix2 - ix1) * (iy2 - iy1)
                 ioa = intersection / word_area
-                
-                # If at least 10% of the word is inside this region, consider it a candidate.
+
+                # If at least 10% of the word is inside this region, consider it.
                 if ioa > 0.1:
                     area = (rx2 - rx1) * (ry2 - ry1)
                     if area < best_area:
                         best = r_idx
                         best_area = area
-                        
+
         if best is not None:
             region_poly_indices.setdefault(best, []).append(poly_idx)
 
     for r_idx, indices in region_poly_indices.items():
         region_content = str(regions[r_idx].get("content") or "")
         lines = [line.strip() for line in region_content.splitlines() if line.strip()]
-        
-        # Sort polygons by reading order using row-banding
+        flat_tokens = [t for line in lines for t in line.split()]
+
+        # Sort polygons by reading order using row-banding.
         band_tolerance = 15  # in 0-1000 normalised coords
         centroids = {i: _poly_centroid(word_polys[i]["polygon"]) for i in indices}
         by_y = sorted(indices, key=lambda i: centroids[i][1])
@@ -372,118 +374,14 @@ def _assign_word_content(
                 band_y = cy
         if current:
             bands.append(sorted(current, key=lambda j: centroids[j][0]))
-        
-        # indices_sorted is a flat list of polygon indices in this region.
-        # Check if we should perform line-level proportional splitting.
-        flat_tokens = [t for line in lines for t in line.split()]
-        total_tokens = len(flat_tokens)
-        polys_in_region = sum(len(band) for band in bands)
-        
-        if polys_in_region > 0 and total_tokens > polys_in_region * 1.5:
-            # Reconstruct result polygons by splitting the bounding boxes
-            # We pair each band (row of polygons) with a chunk of text.
-            # Map each token chunk to its individual physical polygon
-            valid_bands = []
-            flat_poly_geometries = []
-            for band_indices in bands:
-                band_pgs = []
-                for p_idx in band_indices:
-                    poly = word_polys[p_idx]["polygon"]
-                    if len(poly) >= 8:
-                        x_c = poly[0::2]
-                        x1, x2 = min(x_c), max(x_c)
-                        poly_width = max(1.0, x2 - x1)
-                        
-                        # Filter out purely artefactual/noise lines
-                        if poly_width >= 5:
-                            pg = {
-                                "width": poly_width,
-                                "poly": poly,
-                                "confidence": word_polys[p_idx].get("confidence", 1.0)
-                            }
-                            band_pgs.append(pg)
-                            flat_poly_geometries.append(pg)
-                    result[p_idx]["polygon"] = []  # ALWAYS clear original from result array
-                if band_pgs:
-                    valid_bands.append(band_pgs)
-            
-            def _distribute_tokens(tokens_list, pgs_list):
-                if not tokens_list or not pgs_list:
-                    return
 
-                # Proportional font width approximation to prevent wide/narrow letter box drift
-                def _char_width(c: str) -> float:
-                    cl = c.lower()
-                    if cl in "il1.,'!;:|": return 0.25
-                    if cl in "tfj()[]{}": return 0.45
-                    if cl in "mw": return 1.45
-                    if cl in "abcdegknopqrsuyz": return 0.9
-                    if cl in "xhv": return 0.95
-                    return 1.0
-                def _tok_width(tok: str) -> float:
-                    return sum(_char_width(c) for c in tok)
-                space_width = 1.6
-                left_margin = 0.5
-                right_margin = 2.0
-
-                t_width = sum(pg["width"] for pg in pgs_list)
-                t_chars = sum(_tok_width(t) for t in tokens_list) + len(tokens_list) * space_width + left_margin + right_margin
-
-                t_idx = 0
-                for i, pg in enumerate(pgs_list):
-                    if i == len(pgs_list) - 1:
-                        poly_tokens = tokens_list[t_idx:]
-                    else:
-                        target_chars = t_chars * (pg["width"] / max(1.0, t_width))
-                        current_chars = 0
-                        poly_tokens = []
-                        while t_idx < len(tokens_list):
-                            tok = tokens_list[t_idx]
-                            tok_w = _tok_width(tok) + (space_width if current_chars > 0 else 0)
-                            if current_chars > 0 and current_chars + tok_w - target_chars > target_chars - current_chars:
-                                break
-                            poly_tokens.append(tok)
-                            current_chars += tok_w
-                            t_idx += 1
-
-                    if not poly_tokens:
-                        continue
-
-                    px1, py1, px2, py2, px3, py3, px4, py4 = pg["poly"]
-                    dx_top, dy_top = px2 - px1, py2 - py1
-                    dx_bot, dy_bot = px3 - px4, py3 - py4
-
-                    b_total_len = sum(_tok_width(t) for t in poly_tokens) + max(0, len(poly_tokens) - 1) * space_width + left_margin + right_margin
-                    b_current_len = left_margin
-                    for tok_i, token in enumerate(poly_tokens):
-                        s_r = b_current_len / max(1.0, b_total_len)
-                        b_current_len += _tok_width(token)
-                        e_r = b_current_len / max(1.0, b_total_len)
-                        if tok_i < len(poly_tokens) - 1:
-                            b_current_len += space_width
-                        sub_poly = [
-                            px1 + dx_top * s_r, py1 + dy_top * s_r,
-                            px1 + dx_top * e_r, py1 + dy_top * e_r,
-                            px4 + dx_bot * e_r, py4 + dy_bot * e_r,
-                            px4 + dx_bot * s_r, py4 + dy_bot * s_r,
-                        ]
-                        result.append({"polygon": sub_poly, "content": token, "confidence": pg["confidence"]})
-
-            # If Ollama provided exactly as many lines as we have visual layout bands,
-            # we can perfectly match line tokens to line polygons, preventing cascading overflow!
-            if len(lines) > 0 and len(valid_bands) == len(lines):
-                for b_i, band_pgs in enumerate(valid_bands):
-                    band_tokens = lines[b_i].split()
-                    _distribute_tokens(band_tokens, band_pgs)
-            else:
-                # Fall back to distributing all tokens mathematically across all raw geometries
-                _distribute_tokens(flat_tokens, flat_poly_geometries)
-        else:
-            # 1-to-1 fallback mapping
-            indices_sorted = [i for band in bands for i in band]
-            for token_idx, poly_idx in enumerate(indices_sorted):
-                if poly_idx < len(result):
-                    result[poly_idx]["content"] = flat_tokens[token_idx] if token_idx < len(flat_tokens) else ""
+        # 1-to-1 mapping in reading order. Each detected polygon gets the
+        # next per-region token if one is available; polygons past the end
+        # keep the detector content they already had.
+        indices_sorted = [i for band in bands for i in band]
+        for token_idx, poly_idx in enumerate(indices_sorted):
+            if poly_idx < len(result) and token_idx < len(flat_tokens):
+                result[poly_idx]["content"] = flat_tokens[token_idx]
 
     return [r for r in result if r and r.get("polygon")]
 
@@ -850,10 +748,11 @@ class DocumentPipeline:
                     word_polys = await asyncio.to_thread(
                         selected_word_detector.detect, page_image
                     )
-                    # Strip detector-provided text so word content always
-                    # comes from the primary OCR's region text.
-                    for wp in word_polys:
-                        wp.pop("content", None)
+                    # Detector-provided text (DocTR / PaddleOCR per-word
+                    # recognition) is preserved as a fallback. Per-region
+                    # OCR tokens are mapped onto the polygons in reading
+                    # order inside _assign_word_content and override the
+                    # detector text where they cover.
                     page_layout["word_polys"] = _assign_word_content(
                         word_polys, cast(list, page_layout.get("regions", []))
                     )
