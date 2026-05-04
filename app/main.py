@@ -14,6 +14,7 @@ from app.api.routes import compat_router, router, warm_example
 from app.config import Settings, get_settings
 from app.services.analyze_operation_store import AnalyzeOperationStore
 from app.services.backend_router import OCRBackendRouter
+from app.services.compare_engines import available_engines as compare_available_engines
 from app.services.document_pipeline import DocumentPipeline
 from app.services.ocr_pipeline import OCRPipeline
 from app.services.ollama_client import OllamaClient
@@ -179,6 +180,7 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
                 ),
                 "azure_preset_label": settings.azure_preset_label,
                 "azure_preset_endpoint": settings.azure_preset_endpoint,
+                "compare_engines": compare_available_engines(),
                 "examples": [
                     {"slot": idx + 1, "label": label}
                     for idx, (label, _path) in enumerate(settings.examples)

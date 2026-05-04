@@ -1278,7 +1278,8 @@ pre {
   gap: 0.5rem;
 }
 
-.compare-form input {
+.compare-form input,
+.compare-form select {
   width: 100%;
   padding: 0.35rem 0.55rem;
   border: 1px solid var(--line);
@@ -1286,6 +1287,35 @@ pre {
   background: var(--bg);
   color: var(--ink);
   font-size: 0.85rem;
+}
+
+.compare-engine-label {
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.engine-fields {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px dashed color-mix(in srgb, var(--line) 78%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel) 96%, var(--accent) 4%);
+}
+
+.engine-fields-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+}
+
+.compare-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .compare-diff-summary {

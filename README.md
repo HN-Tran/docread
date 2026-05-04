@@ -5,8 +5,10 @@ Minimales OCR-Demo mit Ollama-Vision-Modell über ein FastAPI-Backend, inklusive
 ## Funktionen
 
 - `POST /api/ocr` für Klartext- oder strukturierte Extraktion
+- `POST /api/compare` für Side-by-Side-Vergleich gegen externe Engines (Azure, OCR-Demo-Peer, Google Vision, Plain-Text-Endpoint) inklusive Metriken-Panel und optionalem CER/WER gegen Referenztext
 - `GET /api/models` zum Auflisten verfügbarer Ollama-Modelle
 - `GET /api/schemas` zum Anzeigen unterstützter strukturierter Schemata
+- `GET /docs` (Swagger UI) und `GET /redoc` (ReDoc) für die interaktive API-Dokumentation
 - Browser-UI unter `/` mit zentrierter Startkarte, Drag-and-Drop-Upload, Auto-Run bei Dateiauswahl, Expertenoptionen, schnellen JSON-Vorgaben (Rechnung, Beleg, Tabelle, Visitenkarte), Hell/Dunkel-Modus, Bild/PDF-Vorschau, JSON-Highlighting und CSV-Download für Tabellen
 - Wort-Polygon-Overlay im Layout-Viewer (`OCR_WORD_DETECTOR=paddleocr|doctr`): wortgenaue Bounding-Polygone pro Layout-Region
 - Evaluations-Runner mit CER/WER und Feldgenauigkeit
@@ -195,6 +197,49 @@ Response-Format:
   "warnings": []
 }
 ```
+
+## Vergleich mit externer OCR-Engine
+
+`POST /api/compare` führt unsere OCR-Pipeline parallel zu einer externen Engine
+aus und liefert Diff, Side-by-Side-Metriken und (optional) CER/WER gegen einen
+Referenztext. `GET /api/compare/engines` listet die unterstützten Engines.
+
+**Unterstützte Engines** (`engine`-Form-Feld):
+
+| `engine` | Konfigurations-Felder | Bemerkungen |
+|---|---|---|
+| `azure` | `azure_endpoint`, `azure_key` | Azure Form Recognizer / Document Intelligence prebuilt-read. Nutzt asynchrones Polling. |
+| `self_peer` | `peer_base_url`, `peer_backend` | Postet die Datei an `<peer_base_url>/api/ocr` einer anderen Instanz dieser App — sinnvoll, um zwei Konfigurationen oder Modellversionen direkt zu vergleichen. |
+| `google_vision` | `google_api_key` | Google Cloud Vision REST (`DOCUMENT_TEXT_DETECTION`). |
+| `plain_text` | `plain_text_url`, optional `plain_text_method`, `plain_text_field`, `plain_text_auth_header`, `plain_text_auth_value` | Generischer Endpoint, der entweder reinen Text oder `{"text": "..."}` liefert. Liefert keine Bounding-Boxen, Diff bleibt textbasiert. |
+
+**Optionale Parameter** (engine-unabhängig):
+
+- `reference_text`: Ground-Truth-Text. Wenn gesetzt, ergänzt die Antwort einen `metrics.reference`-Block mit echten CER, WER und Token-F1 für beide Seiten.
+- `expert_*` und `backend`: greifen für unsere eigene OCR-Seite (siehe oben).
+- `expert_compare_include_detector_only`: bezieht zusätzlich Wort-Polygone des Detektors in den Diff ein, die kein Layout-Token getroffen haben.
+
+**Metriken im Response** (`metrics`-Block):
+
+- `intrinsic`: Tokens, Zeichen, Ø Konfidenz, Latenz pro Seite.
+- `comparison`: paarweise Δ Zeichen, Δ Wörter (normalisierte Levenshtein-Distanz — bewusst _nicht_ CER/WER, da keine Seite Ground Truth ist), Token-Jaccard, Token-Precision/Recall/F1.
+- `reference`: nur wenn `reference_text` mitgeliefert wurde — echte CER, WER, Token-F1 pro Seite.
+
+**Azure-Preset** (Browser-Workflow):
+Sind `AZURE_PRESET_LABEL`, `AZURE_PRESET_ENDPOINT` und `AZURE_PRESET_KEY` gesetzt,
+erscheint im Compare-Formular ein Schnellbutton mit dem Label. Schickt der
+Browser eine Anfrage an genau diese Endpoint-URL ohne API-Key, ergänzt der
+Server den Schlüssel intern — der geheime Wert verlässt nie das Backend.
+
+**Warum kein AWS Textract?**
+AWS Textract ist bewusst _nicht_ enthalten, weil es eine SigV4-Signatur
+braucht und damit entweder `boto3` (~10 MB) oder eine eigene Signatur-
+Implementierung erfordert. Da keine konkrete AWS-Anforderung besteht,
+bleibt die Abhängigkeit draußen. Bei Bedarf:
+
+1. `boto3` als optionalen Extra in `pyproject.toml` ergänzen (analog zum bestehenden `paddle`-Extra).
+2. `app/services/compare_engines/aws_textract.py` nach dem Muster der anderen Engines schreiben (Klasse mit `name`/`label`/`async def analyze`).
+3. In `app/services/compare_engines/registry.py` registrieren.
 
 ## Evaluation
 
