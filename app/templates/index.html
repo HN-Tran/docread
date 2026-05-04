@@ -478,19 +478,54 @@
           <pre id="json-output"></pre>
         </section>
         <section id="compare-section" class="hidden">
-          <h3>Vergleich mit Azure-Endpunkt</h3>
+          <h3>Vergleich mit externer OCR-Engine</h3>
           <form class="compare-form" id="compare-form">
-            <input id="azure-endpoint" type="url" placeholder="Azure-Endpunkt-URL (z. B. https://…)" autocomplete="off" />
-            <input id="azure-key" type="password" placeholder="API-Schlüssel" autocomplete="off" />
-            <button type="submit" class="action-btn">Vergleichen</button>
-            {% if azure_preset_label and azure_preset_endpoint %}
-            <button
-              type="button"
-              class="action-btn secondary-action"
-              id="compare-preset-btn"
-              data-endpoint="{{ azure_preset_endpoint }}"
-            >{{ azure_preset_label }}</button>
-            {% endif %}
+            <label class="compare-engine-label">
+              Engine
+              <select id="compare-engine">
+                {% for eng in compare_engines %}
+                <option value="{{ eng.name }}">{{ eng.label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+
+            <div class="engine-fields" data-engine="azure">
+              <input id="azure-endpoint" type="url" placeholder="Azure-Endpunkt-URL (z. B. https://…)" autocomplete="off" />
+              <input id="azure-key" type="password" placeholder="API-Schlüssel" autocomplete="off" />
+            </div>
+
+            <div class="engine-fields hidden" data-engine="self_peer">
+              <input id="peer-base-url" type="url" placeholder="Peer-Basis-URL (z. B. https://…)" autocomplete="off" />
+              <input id="peer-backend" type="text" placeholder="Backend (optional, z. B. expert)" autocomplete="off" />
+            </div>
+
+            <div class="engine-fields hidden" data-engine="google_vision">
+              <input id="google-api-key" type="password" placeholder="Google-Vision-API-Key" autocomplete="off" />
+            </div>
+
+            <div class="engine-fields hidden" data-engine="plain_text">
+              <input id="plain-text-url" type="url" placeholder="Endpunkt-URL" autocomplete="off" />
+              <div class="engine-fields-row">
+                <input id="plain-text-method" type="text" placeholder="Methode (POST)" autocomplete="off" />
+                <input id="plain-text-field" type="text" placeholder="JSON-Feld (text)" autocomplete="off" />
+              </div>
+              <div class="engine-fields-row">
+                <input id="plain-text-auth-header" type="text" placeholder="Auth-Header (optional)" autocomplete="off" />
+                <input id="plain-text-auth-value" type="text" placeholder="Auth-Wert (optional)" autocomplete="off" />
+              </div>
+            </div>
+
+            <div class="compare-actions">
+              <button type="submit" class="action-btn">Vergleichen</button>
+              {% if azure_preset_label and azure_preset_endpoint %}
+              <button
+                type="button"
+                class="action-btn secondary-action"
+                id="compare-preset-btn"
+                data-endpoint="{{ azure_preset_endpoint }}"
+              >{{ azure_preset_label }}</button>
+              {% endif %}
+            </div>
           </form>
           <p id="compare-summary" class="compare-diff-summary hidden"></p>
 

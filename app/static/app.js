@@ -64,6 +64,8 @@ const comparePresetBtn = document.getElementById("compare-preset-btn");
 const pageSelectorWrapEl = document.getElementById("page-selector-wrap");
 const pageSelectorEl = document.getElementById("page-selector");
 const compareSummaryEl = document.getElementById("compare-summary");
+const compareEngineEl = document.getElementById("compare-engine");
+const engineFieldGroups = Array.from(document.querySelectorAll(".engine-fields"));
 const referenceTextEl = document.getElementById("reference-text");
 const referenceFileEl = document.getElementById("reference-file");
 const referenceClearBtnEl = document.getElementById("reference-clear-btn");
@@ -1866,14 +1868,15 @@ function applyCompareResponse(data) {
   const matchedTotal = lastDiff?.matched_count ?? 0;
   const mismatchedTotal = lastDiff?.mismatched_count ?? 0;
   const onlyOursTotal = lastDiff?.only_ours_count ?? 0;
-  const onlyAzureTotal = lastDiff?.only_azure_count ?? 0;
+  const onlyTheirsTotal = lastDiff?.only_theirs_count ?? lastDiff?.only_azure_count ?? 0;
 
   const pageLabel = pageCount > 1 ? ` (alle ${pageCount} Seiten)` : "";
+  const theirsLabel = data?.engine?.label || "Andere";
   compareSummaryEl.innerHTML =
     `<span class="diff-legend-item diff-legend-matched">Übereinstimmung: <b>${matchedTotal}</b></span> | ` +
     `<span class="diff-legend-item diff-legend-mismatch">Abweichung: <b>${mismatchedTotal}</b></span> | ` +
     `<span class="diff-legend-item diff-legend-ours">Nur wir: <b>${onlyOursTotal}</b></span> | ` +
-    `<span class="diff-legend-item diff-legend-azure">Nur Azure: <b>${onlyAzureTotal}</b></span>` +
+    `<span class="diff-legend-item diff-legend-azure">Nur ${escapeHtml(theirsLabel)}: <b>${onlyTheirsTotal}</b></span>` +
     `<span class="compare-total-hint">${pageLabel}</span>`;
   compareSummaryEl.classList.remove("hidden");
 
@@ -2424,14 +2427,66 @@ wordToggleBtnEl.addEventListener("click", () => {
 });
 
 // Compare with Azure endpoint
+function _activeEngineName() {
+  return compareEngineEl?.value?.trim() || "azure";
+}
+
+function _showEngineFields(name) {
+  engineFieldGroups.forEach((group) => {
+    const matches = group.dataset.engine === name;
+    group.classList.toggle("hidden", !matches);
+  });
+}
+
+if (compareEngineEl) {
+  _showEngineFields(_activeEngineName());
+  compareEngineEl.addEventListener("change", () => _showEngineFields(_activeEngineName()));
+}
+
+function _appendEngineConfig(fd, engineName) {
+  const get = (id) => document.getElementById(id)?.value?.trim() || "";
+  if (engineName === "azure") {
+    if (!get("azure-endpoint")) return "Azure-Endpunkt fehlt.";
+    fd.append("azure_endpoint", get("azure-endpoint"));
+    fd.append("azure_key", get("azure-key"));
+  } else if (engineName === "self_peer") {
+    if (!get("peer-base-url")) return "Peer-URL fehlt.";
+    fd.append("peer_base_url", get("peer-base-url"));
+    if (get("peer-backend")) fd.append("peer_backend", get("peer-backend"));
+  } else if (engineName === "google_vision") {
+    if (!get("google-api-key")) return "Google-Vision-API-Key fehlt.";
+    fd.append("google_api_key", get("google-api-key"));
+  } else if (engineName === "plain_text") {
+    if (!get("plain-text-url")) return "Plain-Text-Endpunkt-URL fehlt.";
+    fd.append("plain_text_url", get("plain-text-url"));
+    if (get("plain-text-method")) fd.append("plain_text_method", get("plain-text-method"));
+    if (get("plain-text-field")) fd.append("plain_text_field", get("plain-text-field"));
+    if (get("plain-text-auth-header"))
+      fd.append("plain_text_auth_header", get("plain-text-auth-header"));
+    if (get("plain-text-auth-value"))
+      fd.append("plain_text_auth_value", get("plain-text-auth-value"));
+  } else {
+    return `Unbekannte Engine: ${engineName}`;
+  }
+  return null;
+}
+
 compareFormEl.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const endpoint = azureEndpointEl.value.trim();
-  const key = azureKeyEl.value.trim();
-  if (!endpoint) return;
   const file = currentFile();
   if (!file) {
     compareSummaryEl.textContent = "Kein Bild geladen.";
+    compareSummaryEl.classList.remove("hidden");
+    return;
+  }
+
+  const engineName = _activeEngineName();
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("engine", engineName);
+  const configError = _appendEngineConfig(fd, engineName);
+  if (configError) {
+    compareSummaryEl.textContent = configError;
     compareSummaryEl.classList.remove("hidden");
     return;
   }
@@ -2443,11 +2498,6 @@ compareFormEl.addEventListener("submit", async (event) => {
   renderMetricsPanel(null);
   clearDiffPanel();
   renderDiffOverlay(null);
-
-  const fd = new FormData();
-  fd.append("file", file);
-  fd.append("azure_endpoint", endpoint);
-  fd.append("azure_key", key);
 
   const appendIfSet = (name, rawValue, { bool = false } = {}) => {
     const value = String(rawValue ?? "").trim();
@@ -2512,6 +2562,10 @@ if (comparePresetBtn) {
   comparePresetBtn.addEventListener("click", () => {
     const endpoint = comparePresetBtn.dataset.endpoint || "";
     if (!endpoint) return;
+    if (compareEngineEl) {
+      compareEngineEl.value = "azure";
+      _showEngineFields("azure");
+    }
     azureEndpointEl.value = endpoint;
     compareFormEl.requestSubmit();
   });

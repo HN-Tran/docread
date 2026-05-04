@@ -32,6 +32,16 @@ from app.config import get_settings
 from app.schemas import SCHEMA_REGISTRY
 from app.services.analyze_operation_store import AnalyzeOperationStore
 from app.services.backend_router import OCRBackendRouter
+from app.services.compare_engines import (
+    Engine,
+    EngineResult,
+)
+from app.services.compare_engines import (
+    available_engines as compare_available_engines,
+)
+from app.services.compare_engines import (
+    build_engine as build_compare_engine,
+)
 from app.services.compare_metrics import compute as compute_compare_metrics
 from app.services.ocr_pipeline import OCRResult
 from app.services.ollama_client import OllamaClient, OllamaError
@@ -1615,37 +1625,6 @@ def _iou_bbox(a: tuple[float, float, float, float], b: tuple[float, float, float
     return inter / union if union > 0 else 0.0
 
 
-def _normalize_azure_words_per_page(pages: list[object]) -> list[list[dict[str, object]]]:
-    """Normalize Azure word polygon coords from pixels to 0-1000 scale, per page."""
-    result_pages: list[list[dict[str, object]]] = []
-    for page in pages:
-        if not isinstance(page, dict):
-            result_pages.append([])
-            continue
-        pw = float(page.get("width") or 1000)
-        ph = float(page.get("height") or 1000)
-        page_words: list[dict[str, object]] = []
-        for word in page.get("words") or []:
-            if not isinstance(word, dict):
-                continue
-            polygon = word.get("polygon", [])
-            if isinstance(polygon, list) and len(polygon) >= 8:
-                norm: list[float] = [
-                    float(v) / (pw if i % 2 == 0 else ph) * 1000 for i, v in enumerate(polygon)
-                ]
-            else:
-                norm = []
-            page_words.append(
-                {
-                    "content": word.get("content", ""),
-                    "polygon": norm,
-                    "confidence": word.get("confidence", 0.0),
-                }
-            )
-        result_pages.append(page_words)
-    return result_pages
-
-
 _DIFF_PUNCT_RE = re.compile(r"[\s\u00a0\u200b\.,;:!?\"'`´‘’“”„‚()\[\]{}<>/\\|_*-]+")
 
 
@@ -1760,47 +1739,6 @@ def _diff_word_polygons(
     }
 
 
-async def _call_azure_read(
-    endpoint: str,
-    key: str,
-    image_bytes: bytes,
-    content_type: str,
-    timeout_s: float = 60.0,
-    verify_ssl: bool = True,
-) -> dict[str, object]:
-    """Call Azure prebuilt-read endpoint and return the analyzeResult dict."""
-    url = f"{endpoint.rstrip('/')}/formrecognizer/documentModels/prebuilt-read:analyze"
-    headers = {
-        "Ocp-Apim-Subscription-Key": key,
-        "Content-Type": content_type or "application/octet-stream",
-    }
-    params = {"api-version": AZURE_API_VERSION}
-    async with httpx.AsyncClient(timeout=timeout_s, verify=verify_ssl) as client:
-        resp = await client.post(url, content=image_bytes, headers=headers, params=params)
-        resp.raise_for_status()
-        if resp.status_code == 200:
-            result: dict[str, object] = resp.json()
-            return result
-        # 202 async — poll Operation-Location
-        op_url = resp.headers.get("Operation-Location", "")
-        if not op_url:
-            raise ValueError("Azure returned 202 ohne Operation-Location-Header")
-        poll_headers = {"Ocp-Apim-Subscription-Key": key}
-        deadline = time.monotonic() + timeout_s
-        while time.monotonic() < deadline:
-            await asyncio.sleep(1.5)
-            poll = await client.get(op_url, headers=poll_headers)
-            poll.raise_for_status()
-            data: dict[str, object] = poll.json()
-            st = str(data.get("status", ""))
-            if st == "succeeded":
-                return data
-            if st in ("failed", "canceled"):
-                err = data.get("error", st)
-                raise ValueError(f"Azure OCR fehlgeschlagen: {err}")
-        raise TimeoutError("Azure OCR Timeout")
-
-
 _OURS_POLYGON_MATCH_THRESHOLD = 70.0
 
 
@@ -1847,13 +1785,16 @@ async def warm_example(
 
     compare_response: dict[str, object] | None = None
     if azure_endpoint:
-        compare_response = await _execute_compare_against_azure(
+        engine = build_compare_engine(
+            "azure",
+            {"azure_endpoint": azure_endpoint, "azure_key": azure_key},
+            verify_ssl=verify_ssl,
+        )
+        compare_response = await _execute_compare(
             image_bytes=image_bytes,
             content_type=content_type,
-            azure_endpoint=azure_endpoint,
-            azure_key=azure_key,
+            engine=engine,
             pipeline=pipeline,
-            verify_ssl=verify_ssl,
             include_detector_only=include_detector_only,
         )
 
@@ -1941,14 +1882,12 @@ def _build_ours_words_from_page_text(
     return words
 
 
-async def _execute_compare_against_azure(
+async def _execute_compare(
     *,
     image_bytes: bytes,
     content_type: str,
-    azure_endpoint: str,
-    azure_key: str,
+    engine: Engine,
     pipeline: OCRBackendRouter,
-    verify_ssl: bool,
     include_detector_only: bool,
     backend: str | None = None,
     expert_enable_layout: bool | None = None,
@@ -1961,7 +1900,7 @@ async def _execute_compare_against_azure(
     expert_word_detector: str | None = None,
     reference_text: str | None = None,
 ) -> dict[str, object]:
-    """Run our-OCR + Azure OCR concurrently and build the compare response.
+    """Run our-OCR + the chosen external engine concurrently and build the compare response.
 
     Shared between the /api/compare endpoint and the example warmer. Raises
     on failure (callers translate to HTTPException or log + skip).
@@ -1996,27 +1935,17 @@ async def _execute_compare_against_azure(
             )
         )
     )
-    azure_task = asyncio.create_task(
-        _timed(
-            _call_azure_read(
-                azure_endpoint,
-                azure_key,
-                image_bytes,
-                content_type,
-                verify_ssl=verify_ssl,
-            )
-        )
-    )
-    our_outcome, azure_outcome = await asyncio.gather(our_task, azure_task, return_exceptions=True)
+    their_task = asyncio.create_task(_timed(engine.analyze(image_bytes, content_type)))
+    our_outcome, their_outcome = await asyncio.gather(our_task, their_task, return_exceptions=True)
     if isinstance(our_outcome, BaseException):
         raise our_outcome
-    if isinstance(azure_outcome, BaseException):
-        raise azure_outcome
+    if isinstance(their_outcome, BaseException):
+        raise their_outcome
 
     (our_result, _selected_backend), our_latency_ms = cast(
         tuple[tuple[OCRResult, str], int], our_outcome
     )
-    azure_response, azure_latency_ms = cast(tuple[dict[str, object], int], azure_outcome)
+    their_engine_result, their_latency_ms = cast(tuple[EngineResult, int], their_outcome)
 
     our_analyze = _build_analyze_result(
         content=our_result.text,
@@ -2063,60 +1992,76 @@ async def _execute_compare_against_azure(
             words = []
         our_words_per_page.append(words)
 
-    raw_azure = azure_response.get("analyzeResult")
-    azure_analyze: dict[str, object] = raw_azure if isinstance(raw_azure, dict) else azure_response
-    raw_pages = azure_analyze.get("pages")
-    azure_pages: list[object] = raw_pages if isinstance(raw_pages, list) else []
-    azure_words_per_page = _normalize_azure_words_per_page(azure_pages)
-    raw_content = azure_analyze.get("content")
-    azure_text = str(raw_content) if raw_content is not None else ""
+    their_text = their_engine_result.text
+    their_words_per_page = their_engine_result.words_per_page
 
-    page_count = max(len(our_words_per_page), len(azure_words_per_page), 1)
+    page_count = max(len(our_words_per_page), len(their_words_per_page), 1)
     diff_pages: list[dict[str, object]] = []
-    matched_total = mismatched_total = only_ours_total = only_azure_total = 0
+    matched_total = mismatched_total = only_ours_total = only_theirs_total = 0
     for i in range(page_count):
         ours_page = our_words_per_page[i] if i < len(our_words_per_page) else []
-        azure_page = azure_words_per_page[i] if i < len(azure_words_per_page) else []
-        page_diff = _diff_word_polygons(ours_page, azure_page)
+        theirs_page = their_words_per_page[i] if i < len(their_words_per_page) else []
+        page_diff = _diff_word_polygons(ours_page, theirs_page)
         diff_pages.append(page_diff)
         matched_total += int(cast(int, page_diff.get("matched_count", 0)))
         mismatched_total += int(cast(int, page_diff.get("mismatched_count", 0)))
         only_ours_total += len(cast(list, page_diff.get("only_ours", [])))
-        only_azure_total += len(cast(list, page_diff.get("only_azure", [])))
+        only_theirs_total += len(cast(list, page_diff.get("only_azure", [])))
 
     metrics = compute_compare_metrics(
         our_text=our_result.text,
         our_words_per_page=our_words_per_page,
         our_latency_ms=our_latency_ms,
-        their_text=azure_text,
-        their_words_per_page=azure_words_per_page,
-        their_latency_ms=azure_latency_ms,
+        their_text=their_text,
+        their_words_per_page=their_words_per_page,
+        their_latency_ms=their_latency_ms,
         reference_text=reference_text,
     )
 
     return {
+        "engine": {"name": engine.name, "label": engine.label},
         "our_text": our_result.text,
-        "azure_text": azure_text,
+        "their_text": their_text,
         "our_words_per_page": our_words_per_page,
-        "azure_words_per_page": azure_words_per_page,
+        "their_words_per_page": their_words_per_page,
         "diff": {
             "pages": diff_pages,
             "matched_count": matched_total,
             "mismatched_count": mismatched_total,
             "only_ours_count": only_ours_total,
-            "only_azure_count": only_azure_total,
+            "only_theirs_count": only_theirs_total,
         },
         "metrics": metrics,
         "our_warnings": our_result.warnings,
     }
 
 
+@router.get("/compare/engines")
+async def compare_engines() -> dict[str, object]:
+    """Liste der unterstützten Vergleichs-Engines (für das Frontend-Dropdown)."""
+    return {"engines": compare_available_engines()}
+
+
 @router.post("/compare")
-async def compare_with_azure(
+async def compare_with_engine(
     request: Request,
     file: UploadFile | None = File(None),
-    azure_endpoint: str = Form(...),
-    azure_key: str = Form(default=""),
+    engine: str = Form("azure"),
+    # Azure-spezifisch
+    azure_endpoint: str | None = Form(None),
+    azure_key: str | None = Form(None),
+    # Self-Peer
+    peer_base_url: str | None = Form(None),
+    peer_backend: str | None = Form(None),
+    # Google Vision
+    google_api_key: str | None = Form(None),
+    # Plain-Text
+    plain_text_url: str | None = Form(None),
+    plain_text_method: str | None = Form(None),
+    plain_text_field: str | None = Form(None),
+    plain_text_auth_header: str | None = Form(None),
+    plain_text_auth_value: str | None = Form(None),
+    # Eigene Pipeline-Optionen
     backend: str | None = Form(None),
     expert_enable_layout: bool | None = Form(None),
     expert_layout_model: str | None = Form(None),
@@ -2136,17 +2081,38 @@ async def compare_with_azure(
         if expert_compare_include_detector_only is None
         else expert_compare_include_detector_only
     )
-    # When the request targets the configured preset endpoint, fall back to
-    # the server-side preset key so callers (e.g. the preset button) don't
-    # need to expose the secret in the browser.
-    effective_azure_key = azure_key
+
+    engine_config: dict[str, str] = {
+        "azure_endpoint": azure_endpoint or "",
+        "azure_key": azure_key or "",
+        "peer_base_url": peer_base_url or "",
+        "peer_backend": peer_backend or "",
+        "google_api_key": google_api_key or "",
+        "plain_text_url": plain_text_url or "",
+        "plain_text_method": plain_text_method or "",
+        "plain_text_field": plain_text_field or "",
+        "plain_text_auth_header": plain_text_auth_header or "",
+        "plain_text_auth_value": plain_text_auth_value or "",
+    }
+    # Server-seitiger Preset-Key für Azure: wenn die URL zum konfigurierten
+    # Preset-Endpoint passt und der Aufrufer keinen Key mitschickt, ergänzen
+    # wir den Key serverseitig (sodass das Frontend ihn nicht halten muss).
     if (
-        not effective_azure_key
+        engine.strip().lower() == "azure"
+        and not engine_config["azure_key"]
         and settings.azure_preset_endpoint
-        and azure_endpoint.strip() == settings.azure_preset_endpoint
+        and engine_config["azure_endpoint"].strip() == settings.azure_preset_endpoint
         and settings.azure_preset_key
     ):
-        effective_azure_key = settings.azure_preset_key
+        engine_config["azure_key"] = settings.azure_preset_key
+
+    try:
+        engine_instance = build_compare_engine(
+            engine, engine_config, verify_ssl=settings.verify_ssl
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
     if file is not None:
         image_bytes = await file.read()
         content_type = _resolve_effective_content_type(file.content_type, image_bytes)
@@ -2165,13 +2131,11 @@ async def compare_with_azure(
         )
 
     try:
-        return await _execute_compare_against_azure(
+        return await _execute_compare(
             image_bytes=image_bytes,
             content_type=content_type,
-            azure_endpoint=azure_endpoint,
-            azure_key=effective_azure_key,
+            engine=engine_instance,
             pipeline=pipeline,
-            verify_ssl=settings.verify_ssl,
             include_detector_only=include_detector_only,
             backend=backend,
             expert_enable_layout=expert_enable_layout,
@@ -2189,7 +2153,7 @@ async def compare_with_azure(
     except httpx.HTTPError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"OCR-Backend oder Azure nicht erreichbar: {exc}",
+            detail=f"OCR-Backend oder Vergleichs-Engine nicht erreichbar: {exc}",
         ) from exc
     except Exception as exc:  # noqa: BLE001
         logger.exception("Compare-Flow fehlgeschlagen")
