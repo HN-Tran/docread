@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OCR-Demo · Benchmark</title>
+    <link rel="stylesheet" href="{{ app_base_path }}/static/styles.css?v={{ static_version }}" />
+    <link rel="stylesheet" href="{{ app_base_path }}/static/benchmark.css?v={{ static_version }}" />
+  </head>
+  <body data-base-path="{{ app_base_path }}">
+    <main class="bench-page">
+      <header class="bench-head">
+        <div>
+          <h1>Batch-Benchmark</h1>
+          <p class="sub">N Dateien × M Runner. CER/WER/F1 wenn Referenztexte mitgegeben werden.</p>
+        </div>
+        <a class="api-docs-link" href="{{ app_base_path }}/">← Zurück zur App</a>
+      </header>
+
+      <section class="bench-config">
+        <h2>1. Dateien</h2>
+        <input type="file" id="bench-files" multiple
+               accept="image/png,image/jpeg,image/webp,image/gif,image/tiff,.tif,.tiff,application/pdf,.doc,.docx" />
+        <div id="bench-file-list" class="bench-file-list"></div>
+
+        <h2>2. Runner</h2>
+        <div class="bench-runners">
+          <fieldset>
+            <legend>Lokale Modelle (Ollama)</legend>
+            <div id="bench-models" class="bench-checkbox-list"></div>
+          </fieldset>
+          <fieldset>
+            <legend>Externe Engines</legend>
+            <div id="bench-engines" class="bench-checkbox-list">
+              {% for eng in compare_engines %}
+              <label>
+                <input type="checkbox" name="engine" value="{{ eng.name }}" />
+                {{ eng.label }}
+              </label>
+              {% endfor %}
+            </div>
+            <details class="bench-engine-config">
+              <summary>Engine-Konfiguration (für ausgewählte Engines)</summary>
+              <div class="bench-engine-config-body">
+                <label>Azure-Endpunkt <input id="bench-azure-endpoint" type="url" /></label>
+                <label>Azure-Key <input id="bench-azure-key" type="password" /></label>
+                <label>Peer-URL <input id="bench-peer-base-url" type="url" /></label>
+                <label>Peer-Modell <input id="bench-peer-model" type="text" /></label>
+                <label>Google-Vision-API-Key <input id="bench-google-api-key" type="password" /></label>
+                <label>Plain-Text-URL <input id="bench-plain-text-url" type="url" /></label>
+                <label>Plain-Text-Feld <input id="bench-plain-text-field" type="text" placeholder="text" /></label>
+              </div>
+            </details>
+          </fieldset>
+        </div>
+
+        <div class="bench-actions">
+          <button type="button" id="bench-start" class="action-btn">Benchmark starten</button>
+          <span id="bench-status" class="bench-status-pill hidden"></span>
+        </div>
+      </section>
+
+      <section id="bench-results" class="bench-results hidden">
+        <div class="bench-results-head">
+          <h2>Ergebnisse</h2>
+          <div>
+            <a id="bench-mlflow-link" href="#" class="api-docs-link hidden" target="_blank" rel="noopener">MLflow-Run öffnen</a>
+            <a id="bench-csv-link" href="#" class="api-docs-link" download>CSV herunterladen</a>
+            <button type="button" id="bench-cancel" class="api-docs-link">Schließen</button>
+          </div>
+        </div>
+        <div id="bench-aggregate" class="bench-aggregate"></div>
+        <div class="bench-table-wrap">
+          <table id="bench-table" class="bench-table">
+            <thead>
+              <tr>
+                <th>Datei</th>
+                <th>Runner</th>
+                <th>Status</th>
+                <th>Tokens</th>
+                <th>Zeichen</th>
+                <th>Latenz (ms)</th>
+                <th>CER</th>
+                <th>WER</th>
+                <th>F1</th>
+                <th>Hinweise</th>
+              </tr>
+            </thead>
+            <tbody id="bench-table-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+    <script src="{{ app_base_path }}/static/benchmark.js?v={{ static_version }}"></script>
+  </body>
+</html>

@@ -6,6 +6,7 @@ Minimales OCR-Demo mit Ollama-Vision-Modell über ein FastAPI-Backend, inklusive
 
 - `POST /api/ocr` für Klartext- oder strukturierte Extraktion
 - `POST /api/compare` für Side-by-Side-Vergleich gegen externe Engines (Azure, OCR-Demo-Peer, Google Vision, Plain-Text-Endpoint) inklusive Metriken-Panel und optionalem CER/WER gegen Referenztext
+- `POST /api/benchmark` für Batch-Benchmarks (N Dateien × M Runner) mit Live-Progress, CSV-Export und optionalem MLflow-Tracking
 - `GET /api/models` zum Auflisten verfügbarer Ollama-Modelle
 - `GET /api/schemas` zum Anzeigen unterstützter strukturierter Schemata
 - `GET /docs` (Swagger UI) und `GET /redoc` (ReDoc) für die interaktive API-Dokumentation
@@ -240,6 +241,48 @@ bleibt die Abhängigkeit draußen. Bei Bedarf:
 1. `boto3` als optionalen Extra in `pyproject.toml` ergänzen (analog zum bestehenden `paddle`-Extra).
 2. `app/services/compare_engines/aws_textract.py` nach dem Muster der anderen Engines schreiben (Klasse mit `name`/`label`/`async def analyze`).
 3. In `app/services/compare_engines/registry.py` registrieren.
+
+## Batch-Benchmark
+
+`/benchmark` (UI) bzw. `POST /api/benchmark` führen N Dateien gegen M Runner
+aus — Runner sind entweder lokale Ollama-Modelle oder externe Engines aus
+dem Compare-Flow. Pro Zeile werden Token-/Zeichen-Anzahl, Latenz und
+(falls Referenztext mitgegeben wurde) CER/WER/Token-F1 berechnet. Aggregat
+pro Runner liefert Durchschnitt + Standardabweichung.
+
+Job-Lifecycle:
+
+```
+POST   /api/benchmark              → { job_id }
+GET    /api/benchmark              → { jobs: [...] }
+GET    /api/benchmark/{job_id}     → vollständiger Job-State + Live-Progress
+GET    /api/benchmark/{job_id}/csv → CSV-Export
+DELETE /api/benchmark/{job_id}     → aus dem In-Memory-Store löschen
+```
+
+Hard-Caps: 50 Dateien und 5 Runner pro Job. Phase 1 hält Jobs prozesslokal —
+nach einem Restart sind sie weg, also CSV oder MLflow nutzen, wenn die
+Ergebnisse persistieren sollen.
+
+**MLflow-Tracking (optional)**
+
+Wenn `MLFLOW_TRACKING_URI` gesetzt ist UND `mlflow` installiert wurde
+(`pip install '.[mlflow]'`), schreibt der Worker zusätzlich:
+
+- einen Parent-Run pro Job mit Aggregat-Metriken (`<runner>.mean_cer`, …),
+- pro (Datei, Runner) einen verschachtelten Child-Run mit Parametern,
+  Metriken und `hypothesis.txt` / `reference.txt` als Artefakten.
+
+Konfiguration:
+
+```bash
+export MLFLOW_TRACKING_URI=http://mlflow:5000   # oder file:./mlruns
+export MLFLOW_EXPERIMENT_NAME=ocr-demo          # default: "ocr-demo"
+```
+
+Im Benchmark-UI erscheint ein „MLflow-Run öffnen"-Link, sobald der Job
+einen aktiven Tracking-Server verwendet (HTTP/HTTPS — bei `file:`-URIs
+gibt es keine sinnvolle Browser-URL, dann fehlt der Link).
 
 ## Evaluation
 

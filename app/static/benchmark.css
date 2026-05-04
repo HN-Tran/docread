@@ -1,0 +1,261 @@
+.bench-page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1.6rem;
+  display: grid;
+  gap: 1.2rem;
+}
+
+.bench-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.bench-head h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.bench-head .sub {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.bench-config,
+.bench-results {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1.2rem;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.bench-config h2,
+.bench-results-head h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.bench-config input[type="file"] {
+  font-size: 0.85rem;
+}
+
+.bench-file-list {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.bench-file-row {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 0.5rem;
+  align-items: start;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.bench-file-row .bench-file-name {
+  font-weight: 600;
+  color: var(--ink);
+  font-size: 0.82rem;
+  word-break: break-all;
+}
+
+.bench-file-row textarea {
+  width: 100%;
+  min-height: 3.6rem;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.78rem;
+  resize: vertical;
+}
+
+.bench-runners {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+}
+
+.bench-runners fieldset {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+}
+
+.bench-runners legend {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 0 0.4rem;
+}
+
+.bench-checkbox-list {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.bench-checkbox-list label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.bench-engine-config {
+  margin-top: 0.6rem;
+  font-size: 0.8rem;
+}
+
+.bench-engine-config > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.bench-engine-config-body {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.bench-engine-config-body label {
+  display: grid;
+  gap: 0.15rem;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.bench-engine-config-body input {
+  padding: 0.3rem 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.82rem;
+}
+
+.bench-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.bench-status-pill {
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.bench-results-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.bench-aggregate {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.55rem;
+}
+
+.bench-agg-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem;
+  background: var(--bg);
+  font-size: 0.78rem;
+}
+
+.bench-agg-card strong {
+  display: block;
+  font-size: 0.92rem;
+  color: var(--ink);
+  margin-bottom: 0.2rem;
+  word-break: break-all;
+}
+
+.bench-agg-card dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.15rem 0.5rem;
+  margin: 0;
+}
+
+.bench-agg-card dt {
+  color: var(--muted);
+}
+
+.bench-agg-card dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--ink);
+}
+
+.bench-table-wrap {
+  overflow-x: auto;
+}
+
+.bench-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.bench-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--line);
+  padding: 0.35rem 0.45rem;
+}
+
+.bench-table td {
+  padding: 0.32rem 0.45rem;
+  border-bottom: 1px dashed color-mix(in srgb, var(--line) 70%, transparent);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.bench-table td.bench-status-running {
+  color: var(--accent);
+}
+
+.bench-table td.bench-status-error {
+  color: #ef4444;
+}
+
+.bench-table td.bench-warnings {
+  color: #f59e0b;
+  font-size: 0.74rem;
+  max-width: 320px;
+}
+
+@media (max-width: 760px) {
+  .bench-runners {
+    grid-template-columns: 1fr;
+  }
+  .bench-file-row {
+    grid-template-columns: 1fr;
+  }
+}

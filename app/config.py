@@ -53,6 +53,8 @@ class Settings:
     azure_preset_label: str
     azure_preset_endpoint: str
     azure_preset_key: str
+    mlflow_tracking_uri: str
+    mlflow_experiment_name: str
     examples: tuple[tuple[str, str], ...]
     ocr_word_detector: str
     default_token_limit: int
@@ -107,6 +109,8 @@ def get_settings() -> Settings:
         azure_preset_label=os.getenv("AZURE_PRESET_LABEL", "").strip(),
         azure_preset_endpoint=os.getenv("AZURE_PRESET_ENDPOINT", "").strip(),
         azure_preset_key=os.getenv("AZURE_PRESET_KEY", "").strip(),
+        mlflow_tracking_uri=os.getenv("MLFLOW_TRACKING_URI", "").strip(),
+        mlflow_experiment_name=os.getenv("MLFLOW_EXPERIMENT_NAME", "ocr-demo").strip(),
         examples=tuple(examples),
         ocr_word_detector=os.getenv("OCR_WORD_DETECTOR", "doctr").strip().lower(),
         default_token_limit=default_token_limit,
