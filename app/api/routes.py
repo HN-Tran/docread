@@ -8,6 +8,7 @@ import re
 import subprocess
 import tempfile
 import time
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import cast
@@ -32,6 +33,13 @@ from app.config import get_settings
 from app.schemas import SCHEMA_REGISTRY
 from app.services.analyze_operation_store import AnalyzeOperationStore
 from app.services.backend_router import OCRBackendRouter
+from app.services.benchmark import (
+    BenchmarkJobStore,
+    _EngineRunner,
+    _LocalModelRunner,
+    _serialize_job,
+    run_benchmark_job,
+)
 from app.services.compare_engines import (
     Engine,
     EngineResult,
@@ -48,6 +56,7 @@ from app.services.compare_metrics import (
 from app.services.compare_metrics import (
     reference_only as compute_reference_metrics,
 )
+from app.services.mlflow_sink import MlflowSink
 from app.services.ocr_pipeline import OCRResult
 from app.services.ollama_client import OllamaClient, OllamaError
 from app.services.warmed_example_store import WarmedExample, WarmedExampleStore
@@ -975,6 +984,14 @@ def get_analyze_operation_store(request: Request) -> AnalyzeOperationStore:
     return cast(AnalyzeOperationStore, request.app.state.analyze_operation_store)
 
 
+def get_benchmark_store(request: Request) -> BenchmarkJobStore:
+    return cast(BenchmarkJobStore, request.app.state.benchmark_store)
+
+
+def get_mlflow_sink(request: Request) -> MlflowSink:
+    return cast(MlflowSink, request.app.state.mlflow_sink)
+
+
 def _service_status_payload() -> dict[str, str]:
     return {
         "status": "ok",
@@ -1487,6 +1504,209 @@ async def metrics_against_reference(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Referenztext ist leer."
         )
     return {"reference": compute_reference_metrics(reference_text, text)}
+
+
+# ---------------------------------------------------------------------------
+# Batch-Benchmark
+# ---------------------------------------------------------------------------
+
+_BENCHMARK_MAX_FILES = 50
+_BENCHMARK_MAX_RUNNERS = 5
+
+
+@router.get("/benchmark")
+async def benchmark_list(
+    store: BenchmarkJobStore = Depends(get_benchmark_store),
+) -> dict[str, object]:
+    jobs = await store.all()
+    return {"jobs": [_serialize_job(j) for j in jobs]}
+
+
+@router.post("/benchmark")
+async def benchmark_create(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    references: list[str] = Form(default_factory=list),
+    models: str = Form(""),
+    engines: str = Form(""),
+    azure_endpoint: str | None = Form(None),
+    azure_key: str | None = Form(None),
+    peer_base_url: str | None = Form(None),
+    peer_backend: str | None = Form(None),
+    peer_model: str | None = Form(None),
+    google_api_key: str | None = Form(None),
+    plain_text_url: str | None = Form(None),
+    plain_text_method: str | None = Form(None),
+    plain_text_field: str | None = Form(None),
+    plain_text_auth_header: str | None = Form(None),
+    plain_text_auth_value: str | None = Form(None),
+    pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
+    store: BenchmarkJobStore = Depends(get_benchmark_store),
+    mlflow_sink: MlflowSink = Depends(get_mlflow_sink),
+) -> dict[str, object]:
+    del request
+    if not files:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Keine Dateien hochgeladen."
+        )
+    if len(files) > _BENCHMARK_MAX_FILES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Maximal {_BENCHMARK_MAX_FILES} Dateien pro Job.",
+        )
+
+    model_list = [m.strip() for m in models.split(",") if m.strip()]
+    engine_list = [e.strip() for e in engines.split(",") if e.strip()]
+    runner_count = len(model_list) + len(engine_list)
+    if runner_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Mindestens ein Modell oder eine Engine wählen.",
+        )
+    if runner_count > _BENCHMARK_MAX_RUNNERS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Maximal {_BENCHMARK_MAX_RUNNERS} Runner pro Job.",
+        )
+
+    settings = get_settings()
+    engine_config: dict[str, str] = {
+        "azure_endpoint": azure_endpoint or "",
+        "azure_key": azure_key or "",
+        "peer_base_url": peer_base_url or "",
+        "peer_backend": peer_backend or "",
+        "peer_model": peer_model or "",
+        "google_api_key": google_api_key or "",
+        "plain_text_url": plain_text_url or "",
+        "plain_text_method": plain_text_method or "",
+        "plain_text_field": plain_text_field or "",
+        "plain_text_auth_header": plain_text_auth_header or "",
+        "plain_text_auth_value": plain_text_auth_value or "",
+    }
+
+    # Read all uploads into memory upfront — Phase 1 is in-memory anyway.
+    file_payloads: list[tuple[str, bytes, str]] = []
+    for upload in files:
+        content = await upload.read()
+        if not content:
+            continue
+        ctype = _resolve_effective_content_type(upload.content_type, content)
+        content, ctype = await _maybe_convert_word(content, ctype)
+        file_payloads.append((upload.filename or "datei", content, ctype))
+    if not file_payloads:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Alle Dateien sind leer."
+        )
+
+    runners: list[_LocalModelRunner | _EngineRunner] = []
+    for model_name in model_list:
+        runners.append(_LocalModelRunner(label=model_name, model=model_name, pipeline=pipeline))
+    for engine_name in engine_list:
+        try:
+            engine = build_compare_engine(
+                engine_name,
+                engine_config,
+                verify_ssl=settings.verify_ssl,
+                pipeline=pipeline,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Engine {engine_name!r}: {exc}",
+            ) from exc
+        runners.append(_EngineRunner(label=engine.label, engine=engine))
+
+    options = {
+        "files": [name for (name, _bytes, _ct) in file_payloads],
+        "models": model_list,
+        "engines": engine_list,
+    }
+    job = await store.create(options=options, total=len(file_payloads) * len(runners))
+    asyncio.create_task(
+        run_benchmark_job(
+            job=job,
+            files=file_payloads,
+            references=list(references),
+            runners=runners,
+            store=store,
+            mlflow_sink=mlflow_sink,
+        )
+    )
+    return {"job_id": job.id, "status": job.status, "progress_total": job.progress_total}
+
+
+@router.get("/benchmark/{job_id}")
+async def benchmark_get(
+    job_id: str,
+    store: BenchmarkJobStore = Depends(get_benchmark_store),
+) -> dict[str, object]:
+    job = await store.get(job_id)
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Job {job_id} nicht gefunden."
+        )
+    return _serialize_job(job)
+
+
+@router.delete("/benchmark/{job_id}")
+async def benchmark_drop(
+    job_id: str,
+    store: BenchmarkJobStore = Depends(get_benchmark_store),
+) -> dict[str, object]:
+    if not await store.drop(job_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Job {job_id} nicht gefunden."
+        )
+    return {"deleted": job_id}
+
+
+@router.get("/benchmark/{job_id}/csv")
+async def benchmark_csv(
+    job_id: str,
+    store: BenchmarkJobStore = Depends(get_benchmark_store),
+) -> Response:
+    job = await store.get(job_id)
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Job {job_id} nicht gefunden."
+        )
+    columns = [
+        "file_index",
+        "file_name",
+        "runner_kind",
+        "runner_label",
+        "status",
+        "text_chars",
+        "text_tokens",
+        "latency_ms",
+        "cer",
+        "wer",
+        "token_f1",
+        "avg_confidence",
+        "warnings",
+        "error",
+    ]
+
+    def _csv_cell(v: object) -> str:
+        if v is None:
+            return ""
+        if isinstance(v, list):
+            v = " | ".join(str(x) for x in v)
+        s = str(v)
+        if any(c in s for c in (",", '"', "\n")):
+            return '"' + s.replace('"', '""') + '"'
+        return s
+
+    lines = [",".join(columns)]
+    for row in job.rows:
+        d = asdict(row)
+        lines.append(",".join(_csv_cell(d.get(c)) for c in columns))
+    body = "\n".join(lines) + "\n"
+    return Response(
+        content=body,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="benchmark-{job_id}.csv"'},
+    )
 
 
 @router.post("/extract-pdf-text")

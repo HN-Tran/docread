@@ -14,8 +14,10 @@ from app.api.routes import compat_router, router, warm_example
 from app.config import Settings, get_settings
 from app.services.analyze_operation_store import AnalyzeOperationStore
 from app.services.backend_router import OCRBackendRouter
+from app.services.benchmark import BenchmarkJobStore
 from app.services.compare_engines import available_engines as compare_available_engines
 from app.services.document_pipeline import DocumentPipeline
+from app.services.mlflow_sink import make_sink as make_mlflow_sink
 from app.services.ocr_pipeline import OCRPipeline
 from app.services.ollama_client import OllamaClient
 from app.services.warmed_example_store import WarmedExampleStore
@@ -94,6 +96,11 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
         storage_dir=settings.analyze_store_dir
     )
     app.state.warmed_example_store = WarmedExampleStore()
+    app.state.benchmark_store = BenchmarkJobStore()
+    app.state.mlflow_sink = make_mlflow_sink(
+        tracking_uri=settings.mlflow_tracking_uri,
+        experiment_name=settings.mlflow_experiment_name,
+    )
 
     @app.on_event("startup")
     async def _warm_examples_on_startup() -> None:
@@ -143,7 +150,12 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
     base_dir = Path(__file__).resolve().parent
     templates = Jinja2Templates(directory=str(base_dir / "templates"))
     app.state.templates = templates
-    static_files = (base_dir / "static" / "styles.css", base_dir / "static" / "app.js")
+    static_files = (
+        base_dir / "static" / "styles.css",
+        base_dir / "static" / "app.js",
+        base_dir / "static" / "benchmark.css",
+        base_dir / "static" / "benchmark.js",
+    )
     static_version = str(int(max(path.stat().st_mtime for path in static_files)))
     app.state.static_version = static_version
 
@@ -156,6 +168,20 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
         return _status_payload()
 
     app.add_api_route("/status/", status, methods=["GET"], include_in_schema=False)
+
+    @app.get("/benchmark", response_class=HTMLResponse)
+    async def benchmark_page(request: Request) -> HTMLResponse:
+        version = cast(str, request.app.state.static_version)
+        app_base_path = cast(str, request.scope.get("root_path", ""))
+        return templates.TemplateResponse(
+            request=request,
+            name="benchmark.html",
+            context={
+                "compare_engines": compare_available_engines(),
+                "static_version": version,
+                "app_base_path": app_base_path,
+            },
+        )
 
     @app.get("/", response_class=HTMLResponse)
     async def home(request: Request) -> HTMLResponse:
