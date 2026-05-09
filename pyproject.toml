@@ -8,7 +8,7 @@ version = "0.2.4"
 description = "Minimales OCR-Demo mit Ollama und FastAPI"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Proprietary" }
+license = { text = "Apache-2.0" }
 authors = [
   { name = "HN-Tran" },
 ]
