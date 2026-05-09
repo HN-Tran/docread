@@ -521,8 +521,8 @@ docker compose down
 
 ## Lizenz
 
-Proprietär - nur für interne Nutzung.
+Apache-2.0 — siehe [`LICENSE`](LICENSE).
 
 ## Autor
 
-HN-Tran
+HN-Tran — <https://github.com/HN-Tran>
