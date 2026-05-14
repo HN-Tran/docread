@@ -554,6 +554,7 @@ class DocumentPipeline:
         per_region_ocr: bool = True,
         text_anchor: bool = True,
         text_anchor_threshold: float = 60.0,
+        assemble_from_regions: bool = False,
     ) -> tuple[dict[str, object], str, list[str]]:
         """Full-page OCR + layout detection, return (page_layout, page_text, warnings)."""
         warnings: list[str] = []
@@ -645,6 +646,12 @@ class DocumentPipeline:
             "page_number": page_number,
             "regions": layout_regions,
         }
+
+        if assemble_from_regions:
+            region_texts = [str(r.get("content", "")) for r in layout_regions if r.get("content")]
+            if region_texts:
+                page_text = "\n\n".join(region_texts)
+
         return page_layout, page_text, warnings
 
     # ------------------------------------------------------------------
@@ -671,6 +678,7 @@ class DocumentPipeline:
         expert_text_anchor: bool | None = None,
         expert_text_anchor_threshold: float | None = None,
         expert_word_detector: str | None = None,
+        expert_assemble_from_regions: bool | None = None,
     ) -> OCRResult:
         selected_model = (model or "").strip() or self.default_model
         selected_task = (task or PLAIN_TASK_OCR_TEXT).strip()
@@ -694,6 +702,7 @@ class DocumentPipeline:
             if expert_text_anchor_threshold is None
             else expert_text_anchor_threshold
         )
+        selected_assemble_from_regions = bool(expert_assemble_from_regions)
         selected_word_detector: WordDetector | None = self.word_detector
         word_detector_warning: str | None = None
         if expert_word_detector is not None and expert_word_detector != "":
@@ -806,6 +815,7 @@ class DocumentPipeline:
                 page_number=page_number,
                 use_table_transformer=selected_table_transformer,
                 per_region_ocr=selected_per_region_ocr,
+                assemble_from_regions=selected_assemble_from_regions,
                 text_anchor=selected_text_anchor,
                 text_anchor_threshold=selected_text_anchor_threshold,
             )

@@ -41,6 +41,7 @@ class OCRBackendRouter:
         expert_text_anchor: bool | None = None,
         expert_text_anchor_threshold: float | None = None,
         expert_word_detector: str | None = None,
+        expert_assemble_from_regions: bool | None = None,
     ) -> tuple[OCRResult, str]:
         requested_backend = (
             self.default_backend if backend is None else self.normalize_backend(backend)
@@ -68,5 +69,6 @@ class OCRBackendRouter:
             expert_text_anchor=expert_text_anchor,
             expert_text_anchor_threshold=expert_text_anchor_threshold,
             expert_word_detector=expert_word_detector,
+            expert_assemble_from_regions=expert_assemble_from_regions,
         )
         return result, requested_backend

@@ -860,6 +860,7 @@ class OCRPipeline:
         expert_text_anchor: bool | None = None,
         expert_text_anchor_threshold: float | None = None,
         expert_word_detector: str | None = None,
+        expert_assemble_from_regions: bool | None = None,
     ) -> OCRResult:
         warnings: list[str] = []
         selected_plain_task = (task or PLAIN_TASK_OCR_TEXT).strip()

@@ -1148,8 +1148,11 @@ def _usage_logs_payload() -> dict[str, object]:
     }
 
 
+_AZURE_MODEL_IDS = {AZURE_MODEL_ID, "prebuilt-layout"}
+
+
 def _validate_azure_model_id(model_id: str) -> str:
-    if model_id != AZURE_MODEL_ID:
+    if model_id not in _AZURE_MODEL_IDS:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Unbekanntes Modell: {model_id}",
@@ -1343,6 +1346,7 @@ async def _run_plain_ocr(
     expert_text_anchor: bool | None = None,
     expert_text_anchor_threshold: float | None = None,
     expert_word_detector: str | None = None,
+    expert_assemble_from_regions: bool | None = None,
 ) -> tuple[object, str]:
     try:
         return await pipeline.run(
@@ -1364,6 +1368,7 @@ async def _run_plain_ocr(
             expert_text_anchor=expert_text_anchor,
             expert_text_anchor_threshold=expert_text_anchor_threshold,
             expert_word_detector=expert_word_detector,
+            expert_assemble_from_regions=expert_assemble_from_regions,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -1394,6 +1399,7 @@ async def _execute_compat_analyze_operation(
     expert_text_anchor: bool | None = None,
     expert_text_anchor_threshold: float | None = None,
     expert_word_detector: str | None = None,
+    expert_assemble_from_regions: bool | None = None,
 ) -> None:
     try:
         await store.mark_running(operation_id, started_at=datetime.now(timezone.utc))
@@ -1410,6 +1416,7 @@ async def _execute_compat_analyze_operation(
             expert_text_anchor=expert_text_anchor,
             expert_text_anchor_threshold=expert_text_anchor_threshold,
             expert_word_detector=expert_word_detector,
+            expert_assemble_from_regions=expert_assemble_from_regions,
         )
         completed_at = datetime.now(timezone.utc)
         payload = _build_compat_response_payload(
@@ -1766,6 +1773,7 @@ async def benchmark_create(
             model=model_name,
             backend=backend_override,
             pipeline=pipeline,
+            assemble_from_regions=(backend_override == "expert"),
         ))
     for engine_name in engine_list:
         if engine_name in ("azure_preset", "azure_preset_layout"):
@@ -2716,6 +2724,7 @@ async def compat_sync_analyze(
     expert_text_anchor: bool | None = Query(None),
     expert_text_anchor_threshold: float | None = Query(None),
     expert_word_detector: str | None = Query(None),
+    expert_assemble_from_regions: bool | None = Query(None),
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
 ) -> JSONResponse:
     del locale
@@ -2723,6 +2732,14 @@ async def compat_sync_analyze(
     _validate_azure_api_version(api_version)
     normalized_string_index_type = _normalize_string_index_type(string_index_type)
     selected_pages = _parse_pages_spec(pages)
+
+    if model_id == "prebuilt-layout":
+        if expert_enable_layout is None:
+            expert_enable_layout = True
+        if expert_per_region_ocr is None:
+            expert_per_region_ocr = True
+        if expert_assemble_from_regions is None:
+            expert_assemble_from_regions = True
 
     started_at = datetime.now(timezone.utc)
     image_bytes, content_type = await _resolve_compat_request_input(request)
@@ -2739,6 +2756,7 @@ async def compat_sync_analyze(
         expert_text_anchor=expert_text_anchor,
         expert_text_anchor_threshold=expert_text_anchor_threshold,
         expert_word_detector=expert_word_detector,
+        expert_assemble_from_regions=expert_assemble_from_regions,
     )
     completed_at = datetime.now(timezone.utc)
     return JSONResponse(
@@ -2771,6 +2789,7 @@ async def compat_analyze(
     expert_text_anchor: bool | None = Query(None),
     expert_text_anchor_threshold: float | None = Query(None),
     expert_word_detector: str | None = Query(None),
+    expert_assemble_from_regions: bool | None = Query(None),
     pipeline: OCRBackendRouter = Depends(get_ocr_backend_router),
     store: AnalyzeOperationStore = Depends(get_analyze_operation_store),
 ) -> Response:
@@ -2779,6 +2798,14 @@ async def compat_analyze(
     _validate_azure_api_version(api_version)
     normalized_string_index_type = _normalize_string_index_type(string_index_type)
     selected_pages = _parse_pages_spec(pages)
+
+    if model_id == "prebuilt-layout":
+        if expert_enable_layout is None:
+            expert_enable_layout = True
+        if expert_per_region_ocr is None:
+            expert_per_region_ocr = True
+        if expert_assemble_from_regions is None:
+            expert_assemble_from_regions = True
 
     started_at = datetime.now(timezone.utc)
     image_bytes, content_type = await _resolve_compat_request_input(request)
@@ -2804,6 +2831,7 @@ async def compat_analyze(
             expert_text_anchor=expert_text_anchor,
             expert_text_anchor_threshold=expert_text_anchor_threshold,
             expert_word_detector=expert_word_detector,
+            expert_assemble_from_regions=expert_assemble_from_regions,
         )
     )
 

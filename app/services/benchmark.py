@@ -128,6 +128,7 @@ class _LocalModelRunner:
     model: str
     pipeline: OCRBackendRouter
     backend: str | None = None
+    assemble_from_regions: bool = False
 
     kind = "local_model"
 
@@ -145,6 +146,7 @@ class _LocalModelRunner:
             custom_prompt=None,
             token_limit=None,
             gif_max_frames=None,
+            expert_assemble_from_regions=self.assemble_from_regions or None,
         )
         words = _flatten_word_polys(result.layout)
         return result.text, words, list(result.warnings or []), _avg_conf(words)

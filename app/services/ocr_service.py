@@ -26,4 +26,5 @@ class OCRService(Protocol):
         expert_text_anchor: bool | None = None,
         expert_text_anchor_threshold: float | None = None,
         expert_word_detector: str | None = None,
+        expert_assemble_from_regions: bool | None = None,
     ) -> OCRResult: ...
