@@ -1779,11 +1779,11 @@ async def benchmark_create(
         if engine_name in ("azure_preset", "azure_preset_layout"):
             is_layout = engine_name == "azure_preset_layout"
             url = settings.azure_preset_layout_endpoint if is_layout else settings.azure_preset_endpoint
-            if not url or not settings.azure_preset_key:
+            if not url:
                 missing = "AZURE_PRESET_LAYOUT_ENDPOINT" if is_layout else "AZURE_PRESET_ENDPOINT"
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Azure-Preset ist nicht konfiguriert ({missing} / AZURE_PRESET_KEY fehlen).",
+                    detail=f"Azure-Preset ist nicht konfiguriert ({missing} fehlt).",
                 )
             preset_engine = AzureEngine(
                 endpoint="",
@@ -1792,7 +1792,7 @@ async def benchmark_create(
                 verify_ssl=settings.verify_ssl,
             )
             base_label = settings.azure_preset_label or preset_engine.label
-            label = f"{base_label} (Layout)" if is_layout else base_label
+            label = f"{base_label} (Layout)" if is_layout else f"{base_label} (Plain)"
             runners.append(_EngineRunner(label=label, engine=preset_engine))
             continue
         try:
