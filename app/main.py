@@ -180,8 +180,8 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
             name="benchmark.html",
             context={
                 "compare_engines": compare_available_engines(),
-                "azure_preset_label": settings.azure_preset_label,
-                "azure_preset_layout_label": f"{settings.azure_preset_label} (Layout)" if settings.azure_preset_layout_endpoint else "",
+                "azure_preset_label": f"{settings.azure_preset_label} (Plain)" if settings.azure_preset_label else "",
+                "azure_preset_layout_label": f"{settings.azure_preset_label} (Layout)" if settings.azure_preset_layout_endpoint and settings.azure_preset_label else "",
                 "static_version": version,
                 "app_base_path": app_base_path,
             },

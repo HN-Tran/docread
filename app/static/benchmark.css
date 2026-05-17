@@ -112,6 +112,30 @@
   background: var(--bg);
 }
 
+.bench-file-row-zip {
+  background: color-mix(in srgb, var(--accent, #3b82f6) 5%, var(--bg));
+  border-color: color-mix(in srgb, var(--accent, #3b82f6) 30%, transparent);
+}
+
+.bench-zip-badge {
+  display: inline-block;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent, #3b82f6) 15%, transparent);
+  color: var(--accent, #3b82f6);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+}
+
+.bench-zip-note {
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-style: italic;
+  align-self: center;
+}
+
 .bench-file-row .bench-file-name {
   font-weight: 600;
   color: var(--ink);

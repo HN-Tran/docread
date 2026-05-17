@@ -66,17 +66,29 @@ fileEl.addEventListener("change", () => addFiles(fileEl.files || []));
 
 const DROP_HINT = `<p class="bench-drop-hint">Bilder, PDFs, Word- oder ZIP-Dateien hier ablegen oder <label for="bench-files" class="bench-drop-label">auswählen</label></p>`;
 
+function isZipFile(f) {
+  return f.type === "application/zip" || f.name.toLowerCase().endsWith(".zip");
+}
+
 function renderFileList() {
   const hint = pickedFiles.length ? "" : DROP_HINT;
   const rows = pickedFiles
-    .map(
-      (f, i) => `
+    .map((f, i) => {
+      if (isZipFile(f)) {
+        return `
+        <div class="bench-file-row bench-file-row-zip" data-file-index="${i}">
+          <div class="bench-file-name">${escapeHtml(f.name)} <span class="bench-zip-badge">ZIP</span></div>
+          <div class="bench-zip-note">Enthaltene Dateien werden entpackt · Referenztexte aus gepaarten .txt-Dateien</div>
+          <button type="button" class="bench-file-delete" data-delete-index="${i}" title="Entfernen">✕</button>
+        </div>`;
+      }
+      return `
       <div class="bench-file-row" data-file-index="${i}">
         <div class="bench-file-name">${escapeHtml(f.name)}</div>
         <textarea data-ref-index="${i}" placeholder="Optionaler Referenztext für CER/WER…"></textarea>
         <button type="button" class="bench-file-delete" data-delete-index="${i}" title="Entfernen">✕</button>
-      </div>`,
-    )
+      </div>`;
+    })
     .join("");
   fileListEl.innerHTML = hint + rows;
   fileListEl.querySelectorAll(".bench-file-delete").forEach((btn) => {
