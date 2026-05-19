@@ -75,13 +75,79 @@ _PIL_TRANSPOSE = {
     270: Image.Transpose.ROTATE_270,
 }
 
+# Snapping tolerance: if detected angle is within this many degrees of a
+# cardinal multiple, use the lossless PIL transpose instead of bicubic rotate.
+_CARDINAL_SNAP_DEG = 3.0
+
+# Minimum centre-of-mass offset from 0.5 (as a fraction of 0..1) needed to
+# trigger a 180° flip in the small-angle branch.  confidence = |vcenter−0.5|×2,
+# so 0.15 corresponds to vcenter ≥ 0.575 (text clearly biased to one half).
+_VCENTER_MIN_CONFIDENCE = 0.15
+
+
+def detect_page_angle(img: Image.Image, *, max_scan_dim: int = 600) -> float:
+    """Detect the CCW rotation angle (degrees) needed to make text horizontal.
+
+    Scans -90° to +90° in two passes (coarse 5°, fine 1°) and returns the
+    angle that maximises horizontal projection variance.  Returns 0.0 when
+    the image is already straight.
+
+    Does NOT resolve 0° vs 180° (identical variance) — ``deskew_image``
+    applies a separate orientation check for that.
+    """
+    # Downsample for the scan so the ~36 rotations stay fast.
+    scan_img = img
+    if max(img.size) > max_scan_dim:
+        ratio = max_scan_dim / max(img.size)
+        scan_img = img.resize(
+            (max(1, int(img.width * ratio)), max(1, int(img.height * ratio))),
+            Image.Resampling.LANCZOS,
+        )
+
+    gray = _to_gray(scan_img)
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    base = Image.fromarray(binary)
+
+    def _var(angle: float) -> float:
+        arr = np.array(
+            base.rotate(angle, expand=True, fillcolor=0, resample=Image.Resampling.NEAREST)
+        )
+        return float(np.var(arr.sum(axis=1).astype(np.float64)))
+
+    # Coarse pass: every 5° from -90° to +90° inclusive.
+    best_angle = 0.0
+    best_var = _var(0.0)
+    for a in range(-90, 91, 5):
+        if a == 0:
+            continue
+        v = _var(float(a))
+        if v > best_var:
+            best_var = v
+            best_angle = float(a)
+
+    # Fine pass: ±4° around the coarse winner (always, even when winner is 0°
+    # so that small CW tilts are detected even when no coarse angle beats 0°).
+    for da in range(-4, 5):
+        if da == 0:
+            continue
+        a = best_angle + da
+        if -90.0 <= a <= 90.0:
+            v = _var(a)
+            if v > best_var:
+                best_var = v
+                best_angle = a
+
+    return best_angle
+
 
 def detect_cardinal_rotation(img: Image.Image) -> tuple[int, float]:
-    """Detect how many degrees CCW to rotate `img` to make text upright.
+    """Fast cardinal-only detector used for per-region orientation correction.
 
     Returns ``(rotation_to_apply, confidence)`` where:
     - ``rotation_to_apply`` ∈ {0, 90, 180, 270} — counter-clockwise degrees
     - ``confidence`` ∈ [0, 1]; values below ~0.70 indicate an uncertain result
+
+    For full-page deskew (including intermediate angles) use ``deskew_image``.
     """
     gray = _to_gray(img)
 
@@ -112,41 +178,10 @@ def detect_cardinal_rotation(img: Image.Image) -> tuple[int, float]:
             winner_k = 1
         else:
             winner_k = 3
-        # 90° vs 270° mismatch is almost always obvious (large variance gap).
         confidence_raw = (score_90_270 - score_0_180) / (score_90_270 + score_0_180 + 1e-6)
         confidence = float(np.clip(confidence_raw * 2.0, 0.0, 1.0))
 
     return winner_k * 90, confidence
-
-
-def detect_fine_skew(img: Image.Image) -> float:
-    """Detect fine skew angle of text from horizontal (degrees, CCW positive).
-
-    Returns 0.0 when fewer than 5 text-line blobs are detected (not confident).
-    To correct, apply: ``image.rotate(-result, expand=True, ...)``.
-    """
-    gray = _to_gray(img)
-    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-
-    # Dilate horizontally to connect words into line-shaped blobs.
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (30, 5))
-    dilated = cv2.dilate(binary, kernel)
-
-    contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    angles: list[float] = []
-    for contour in contours:
-        if cv2.contourArea(contour) < 500:
-            continue
-        _, (w, h), angle = cv2.minAreaRect(contour)
-        if w < h:
-            angle = 90.0 + angle  # align to long axis
-        if -45.0 < angle < 45.0:
-            angles.append(angle)
-
-    if len(angles) < 3:
-        return 0.0
-    return float(np.median(angles))
 
 
 def deskew_image(
@@ -155,30 +190,78 @@ def deskew_image(
     min_angle_deg: float = 0.5,
     cardinal_confidence_threshold: float = 0.70,
 ) -> tuple[Image.Image, float]:
-    """Detect and correct cardinal misorientation and fine skew.
+    """Detect and correct any skew angle plus orientation (0° vs 180°).
+
+    Works for any rotation angle, not only cardinal multiples.  Cardinal
+    snapping (within ``_CARDINAL_SNAP_DEG``) uses a lossless PIL transpose;
+    all other angles use bicubic interpolation.
 
     Returns ``(corrected_image, net_ccw_correction)`` where
     ``net_ccw_correction`` is the total CCW degrees applied (stored in
-    ``page_info["angle"]``; positive = original was tilted CW by that amount).
+    ``page_info["angle"]``).
     """
     net_ccw = 0.0
 
-    # Step 1: Correct cardinal rotation (lossless via PIL transpose).
-    rotation, confidence = detect_cardinal_rotation(img)
-    if rotation != 0 and confidence >= cardinal_confidence_threshold:
-        img = img.transpose(_PIL_TRANSPOSE[rotation])
-        net_ccw += rotation
+    # Step 1: Apply the dominant text angle first (any value in -90°..+90°).
+    # This ensures the orientation check in Step 2 always runs on a roughly
+    # horizontal image where boundary_asymmetry is reliable.  A tilted image
+    # can have blurred projection band edges that fool the 0°/180° heuristic.
+    angle = detect_page_angle(img)
 
-    # Step 2: Fine skew — angle is CCW-positive (negative = CW tilt).
-    skew = detect_fine_skew(img)
-    fine_correction = -skew  # CCW rotation needed to straighten
-    if abs(fine_correction) >= min_angle_deg:
-        img = img.rotate(
-            fine_correction,
-            expand=True,
-            resample=Image.Resampling.BICUBIC,
-            fillcolor=(255, 255, 255),
-        )
-        net_ccw += fine_correction
+    if abs(angle) >= min_angle_deg:
+        # Snap angles close to a cardinal multiple to use lossless transpose.
+        snapped = round(angle / 90) * 90  # nearest multiple of 90
+        if abs(angle - snapped) <= _CARDINAL_SNAP_DEG and snapped != 0:
+            img = img.transpose(_PIL_TRANSPOSE[int(snapped) % 360])
+            net_ccw += snapped
+            residual = angle - snapped
+        else:
+            residual = angle
+
+        if abs(residual) >= min_angle_deg:
+            img = img.rotate(
+                residual,
+                expand=True,
+                resample=Image.Resampling.BICUBIC,
+                fillcolor=(255, 255, 255),
+            )
+            net_ccw += residual
+
+    # Step 2: Orientation check on the now-horizontal image.
+    # 0° vs 180° have identical projection variance, so detect_page_angle
+    # cannot distinguish them.  Two complementary signals are used:
+    #
+    # • For small applied corrections (|net_ccw| < 10°): bicubic resampling
+    #   can distort band entry/exit values enough to flip the BA sign on small
+    #   images.  Instead, compare the relative vertical position of text in the
+    #   image: upright documents have text closer to the top (smaller top
+    #   margin), so centre-of-mass < 0.5 means keep; > 0.5 means flip.
+    #
+    # • For larger corrections the padding from expand=True is substantial, so
+    #   centre-of-mass becomes unreliable; fall back to boundary asymmetry.
+    gray = _to_gray(img)
+    if abs(net_ccw) < 10.0:
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        row_dark = binary.sum(axis=1).astype(np.float64)
+        total_dark = row_dark.sum()
+        if total_dark > 0:
+            rows_idx = np.arange(len(row_dark), dtype=np.float64)
+            vcenter = float((rows_idx * row_dark).sum() / total_dark) / len(row_dark)
+            inverted = vcenter > 0.5
+            confidence = abs(vcenter - 0.5) * 2.0  # 0..1
+        else:
+            inverted = False
+            confidence = 0.0
+    else:
+        ba = _boundary_asymmetry(gray)
+        ba_flip = _boundary_asymmetry(np.rot90(gray, k=2))
+        inverted = ba_flip > ba
+        total_ba = abs(ba) + abs(ba_flip) + 1e-6
+        confidence = float(np.clip((ba_flip - ba) / total_ba, 0.0, 1.0)) if inverted else 0.0
+
+    threshold = _VCENTER_MIN_CONFIDENCE if abs(net_ccw) < 10.0 else cardinal_confidence_threshold
+    if inverted and confidence >= threshold:
+        img = img.transpose(Image.Transpose.ROTATE_180)
+        net_ccw += 180
 
     return img, net_ccw
