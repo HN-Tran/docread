@@ -33,6 +33,7 @@ class _FakeService:
         expert_table_transformer: bool | None = None,
         expert_word_detector: str | None = None,
         inference_provider: str | None = None,
+        **kwargs: object,
     ) -> OCRResult:
         self.calls += 1
         return OCRResult(

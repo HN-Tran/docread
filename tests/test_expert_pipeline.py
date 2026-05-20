@@ -43,6 +43,7 @@ class _FakeDirectPipeline:
         expert_enable_layout: bool | None = None,
         expert_layout_model: str | None = None,
         expert_layout_threshold: float | None = None,
+        **kwargs: object,
     ) -> OCRResult:
         self.calls += 1
         return OCRResult(
