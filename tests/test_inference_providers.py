@@ -23,6 +23,7 @@ def _base_settings(**overrides: object) -> Settings:
         "inference_model": "glm-ocr:latest",
         "inference_api_key": "",
         "inference_vision_models": (),
+        "inference_vision_probe": True,
         "inference_extra_providers": {},
         "ollama_base_url": "http://ollama.test",
         "ollama_model": "glm-ocr:latest",

@@ -72,10 +72,21 @@ def _parse_inference_extra_providers(raw: str) -> dict[str, "InferenceProviderCo
             )
         else:
             vision_models = ()
+        vision_probe_raw = entry.get("vision_probe")
+        vision_probe = None
+        if isinstance(vision_probe_raw, bool):
+            vision_probe = vision_probe_raw
+        elif isinstance(vision_probe_raw, str):
+            normalized = vision_probe_raw.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                vision_probe = True
+            elif normalized in {"0", "false", "no", "off"}:
+                vision_probe = False
         out[key] = InferenceProviderConfig(
             base_url=base_url,
             api_key=api_key,
             vision_models=vision_models,
+            vision_probe=vision_probe,
         )
     return out
 
@@ -85,6 +96,7 @@ class InferenceProviderConfig:
     base_url: str
     api_key: str
     vision_models: tuple[str, ...]
+    vision_probe: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -97,6 +109,7 @@ class Settings:
     inference_model: str
     inference_api_key: str
     inference_vision_models: tuple[str, ...]
+    inference_vision_probe: bool
     inference_extra_providers: dict[str, InferenceProviderConfig]
     ollama_base_url: str
     ollama_model: str
@@ -161,6 +174,7 @@ def get_settings() -> Settings:
     )
     inference_api_key = os.getenv("INFERENCE_API_KEY", "").strip()
     inference_vision_models = _parse_csv_tuple(os.getenv("INFERENCE_VISION_MODELS", ""))
+    inference_vision_probe = _env_bool("INFERENCE_VISION_PROBE", True)
     inference_extra_providers = _parse_inference_extra_providers(
         os.getenv("INFERENCE_EXTRA_PROVIDERS", "")
     )
@@ -190,6 +204,7 @@ def get_settings() -> Settings:
         inference_model=inference_model,
         inference_api_key=inference_api_key,
         inference_vision_models=inference_vision_models,
+        inference_vision_probe=inference_vision_probe,
         inference_extra_providers=inference_extra_providers,
         ollama_base_url=ollama_base_url,
         ollama_model=ollama_model,

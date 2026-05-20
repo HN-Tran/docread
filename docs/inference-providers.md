@@ -98,8 +98,17 @@ export INFERENCE_EXTRA_PROVIDERS='{"openai_compatible":{"base_url":"http://local
 
 The web UI exposes a provider `<select>` and refreshes model suggestions when the selection changes.
 
+### OpenAI-compatible vision detection
+
+When `INFERENCE_VISION_MODELS` is empty, `supports_vision` for OpenAI-compatible servers:
+
+1. Uses configured allowlist if set.
+2. Applies model-id heuristics (`vl`, `llava`, `glm-ocr`, `embed`, …).
+3. Optionally probes with a 1×1 PNG via `/v1/chat/completions` (cached per process).
+
+Disable probing with `INFERENCE_VISION_PROBE=false` (then unknown models are treated as vision-capable).
+
 ## Future work
 
-- Optional vision probe for OpenAI-compatible catalogs without allowlist.
 - Additional adapters (TGI, SGLang) if their APIs diverge from OpenAI shape.
 - Per-provider default models in config.
