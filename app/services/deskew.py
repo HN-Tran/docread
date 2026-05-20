@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -78,12 +78,84 @@ _PIL_TRANSPOSE = {
 
 # Snapping tolerance: if detected angle is within this many degrees of a
 # cardinal multiple, use the lossless PIL transpose instead of bicubic rotate.
-_CARDINAL_SNAP_DEG = 3.0
+_CARDINAL_SNAP_DEG = 1.0
+
+# When step 1 already applied a large skew correction, skip the upside-down flip
+# heuristic — it is only reliable on roughly horizontal pages.
+_LARGE_SKEW_SKIP_FLIP_DEG = 45.0
+
+# Variance ties within this band keep the earlier coarse winner (avoids -90 → +90).
+_VARIANCE_TIE_ABS = 1.0
 
 # Minimum centre-of-mass offset from 0.5 (as a fraction of 0..1) needed to
 # trigger a 180° flip in the small-angle branch.  confidence = |vcenter−0.5|×2,
-# so 0.15 corresponds to vcenter ≥ 0.575 (text clearly biased to one half).
-_VCENTER_MIN_CONFIDENCE = 0.15
+# so 0.13 corresponds to vcenter ≥ 0.565 (text clearly biased to one half).
+_VCENTER_MIN_CONFIDENCE = 0.13
+
+# EXIF orientation tag (274) → CCW degrees applied by ``ImageOps.exif_transpose``.
+_EXIF_ORIENTATION_CCW: dict[int, float] = {
+    3: 180.0,
+    6: 270.0,
+    8: 90.0,
+}
+
+
+def exif_orientation_ccw(img: Image.Image) -> float:
+    """Return the CCW rotation (degrees) that ``ImageOps.exif_transpose`` would apply.
+
+    Mirror-only orientations (2, 4, 5, 7) are reported as 0 because they are not a
+    pure rotation.
+    """
+    try:
+        exif = img.getexif()
+        orientation = exif.get(274)  # Orientation
+    except Exception:  # noqa: BLE001
+        return 0.0
+    if orientation is None:
+        return 0.0
+    try:
+        tag = int(orientation)
+    except (TypeError, ValueError):
+        return 0.0
+    return _EXIF_ORIENTATION_CCW.get(tag, 0.0)
+
+
+def apply_exif_orientation(img: Image.Image) -> tuple[Image.Image, float]:
+    """Apply EXIF orientation and return ``(image, ccw_degrees_applied)``."""
+    ccw = exif_orientation_ccw(img)
+    return ImageOps.exif_transpose(img), ccw
+
+
+def _variance_beats(current: float, best: float) -> bool:
+    return current > best + _VARIANCE_TIE_ABS
+
+
+def _prefer_skew_angle(candidate: float, best: float, *, candidate_var: float, best_var: float) -> bool:
+    """Break near-ties (e.g. -90° vs +90°) without flipping to the opposite cardinal."""
+    if _variance_beats(candidate_var, best_var):
+        return True
+    if abs(candidate_var - best_var) > _VARIANCE_TIE_ABS:
+        return False
+    if abs(candidate) < abs(best):
+        return True
+    if abs(candidate) == abs(best) and candidate < best:
+        return True
+    return False
+
+
+def detect_deskew_correction(
+    img: Image.Image,
+    *,
+    min_angle_deg: float = 0.5,
+    cardinal_confidence_threshold: float = 0.70,
+) -> float:
+    """Return the CCW correction ``deskew_image`` would apply, without mutating ``img``."""
+    _, net_ccw = deskew_image(
+        img.copy(),
+        min_angle_deg=min_angle_deg,
+        cardinal_confidence_threshold=cardinal_confidence_threshold,
+    )
+    return net_ccw
 
 
 def detect_page_angle(img: Image.Image, *, max_scan_dim: int = 600) -> float:
@@ -115,16 +187,19 @@ def detect_page_angle(img: Image.Image, *, max_scan_dim: int = 600) -> float:
         )
         return float(np.var(arr.sum(axis=1).astype(np.float64)))
 
+    def _update_best(candidate: float, candidate_var: float) -> None:
+        nonlocal best_angle, best_var
+        if _prefer_skew_angle(candidate, best_angle, candidate_var=candidate_var, best_var=best_var):
+            best_var = candidate_var
+            best_angle = candidate
+
     # Coarse pass: every 5° from -90° to +90° inclusive.
     best_angle = 0.0
     best_var = _var(0.0)
     for coarse_deg in range(-90, 91, 5):
         if coarse_deg == 0:
             continue
-        v = _var(float(coarse_deg))
-        if v > best_var:
-            best_var = v
-            best_angle = float(coarse_deg)
+        _update_best(float(coarse_deg), _var(float(coarse_deg)))
 
     # Fine pass: ±4° around the coarse winner (always, even when winner is 0°
     # so that small CW tilts are detected even when no coarse angle beats 0°).
@@ -133,10 +208,15 @@ def detect_page_angle(img: Image.Image, *, max_scan_dim: int = 600) -> float:
             continue
         fine_angle = best_angle + float(da)
         if -90.0 <= fine_angle <= 90.0:
-            v = _var(fine_angle)
-            if v > best_var:
-                best_var = v
-                best_angle = fine_angle
+            _update_best(fine_angle, _var(fine_angle))
+
+    # Sub-degree pass: ±3° around the fine winner in 0.5° steps.
+    for step in range(-30, 31):
+        if step == 0:
+            continue
+        fine_angle = best_angle + step * 0.5
+        if -90.0 <= fine_angle <= 90.0:
+            _update_best(fine_angle, _var(fine_angle))
 
     return best_angle
 
@@ -228,41 +308,43 @@ def deskew_image(
             )
             net_ccw += residual
 
-    # Step 2: Orientation check on the now-horizontal image.
-    # 0° vs 180° have identical projection variance, so detect_page_angle
-    # cannot distinguish them.  Two complementary signals are used:
-    #
-    # • For small applied corrections (|net_ccw| < 10°): bicubic resampling
-    #   can distort band entry/exit values enough to flip the BA sign on small
-    #   images.  Instead, compare the relative vertical position of text in the
-    #   image: upright documents have text closer to the top (smaller top
-    #   margin), so centre-of-mass < 0.5 means keep; > 0.5 means flip.
-    #
-    # • For larger corrections the padding from expand=True is substantial, so
-    #   centre-of-mass becomes unreliable; fall back to boundary asymmetry.
-    gray = _to_gray(img)
-    if abs(net_ccw) < 10.0:
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        row_dark = binary.sum(axis=1).astype(np.float64)
-        total_dark = row_dark.sum()
-        if total_dark > 0:
-            rows_idx = np.arange(len(row_dark), dtype=np.float64)
-            vcenter = float((rows_idx * row_dark).sum() / total_dark) / len(row_dark)
-            inverted = vcenter > 0.5
-            confidence = abs(vcenter - 0.5) * 2.0  # 0..1
+    # Step 2: Upside-down check — only when the page is already roughly horizontal.
+    # After a large skew correction (|net_ccw| >= 45°) the flip heuristics misfire.
+    if abs(net_ccw) < _LARGE_SKEW_SKIP_FLIP_DEG:
+        # 0° vs 180° have identical projection variance, so detect_page_angle
+        # cannot distinguish them.  Two complementary signals are used:
+        #
+        # • For small applied corrections (|net_ccw| < 10°): bicubic resampling
+        #   can distort band entry/exit values enough to flip the BA sign on small
+        #   images.  Instead, compare the relative vertical position of text in the
+        #   image: upright documents have text closer to the top (smaller top
+        #   margin), so centre-of-mass < 0.5 means keep; > 0.5 means flip.
+        #
+        # • For larger corrections the padding from expand=True is substantial, so
+        #   centre-of-mass becomes unreliable; fall back to boundary asymmetry.
+        gray = _to_gray(img)
+        if abs(net_ccw) < 10.0:
+            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+            row_dark = binary.sum(axis=1).astype(np.float64)
+            total_dark = row_dark.sum()
+            if total_dark > 0:
+                rows_idx = np.arange(len(row_dark), dtype=np.float64)
+                vcenter = float((rows_idx * row_dark).sum() / total_dark) / len(row_dark)
+                inverted = vcenter > 0.5
+                confidence = abs(vcenter - 0.5) * 2.0  # 0..1
+            else:
+                inverted = False
+                confidence = 0.0
         else:
-            inverted = False
-            confidence = 0.0
-    else:
-        ba = _boundary_asymmetry(gray)
-        ba_flip = _boundary_asymmetry(np.rot90(gray, k=2))
-        inverted = ba_flip > ba
-        total_ba = abs(ba) + abs(ba_flip) + 1e-6
-        confidence = float(np.clip((ba_flip - ba) / total_ba, 0.0, 1.0)) if inverted else 0.0
+            ba = _boundary_asymmetry(gray)
+            ba_flip = _boundary_asymmetry(np.rot90(gray, k=2))
+            inverted = ba_flip > ba
+            total_ba = abs(ba) + abs(ba_flip) + 1e-6
+            confidence = float(np.clip((ba_flip - ba) / total_ba, 0.0, 1.0)) if inverted else 0.0
 
-    threshold = _VCENTER_MIN_CONFIDENCE if abs(net_ccw) < 10.0 else cardinal_confidence_threshold
-    if inverted and confidence >= threshold:
-        img = img.transpose(Image.Transpose.ROTATE_180)
-        net_ccw += 180
+        threshold = _VCENTER_MIN_CONFIDENCE if abs(net_ccw) < 10.0 else cardinal_confidence_threshold
+        if inverted and confidence >= threshold:
+            img = img.transpose(Image.Transpose.ROTATE_180)
+            net_ccw += 180
 
     return img, net_ccw
