@@ -88,6 +88,7 @@ class FakeBackendRouter:
         expert_table_transformer: bool | None = None,
         expert_word_detector: str | None = None,
         inference_provider: str | None = None,
+        **kwargs: object,
     ) -> Any:
         selected_backend = backend or self.default_backend
         self.last_call = {
@@ -195,6 +196,7 @@ class FakeBackendRouterMissingPageInfo(FakeBackendRouter):
         expert_table_transformer: bool | None = None,
         expert_word_detector: str | None = None,
         inference_provider: str | None = None,
+        **kwargs: object,
     ) -> Any:
         result, selected_backend = await super().run(
             backend=backend,
@@ -227,7 +229,7 @@ def test_health() -> None:
     from starlette.testclient import TestClient
 
     from app.main import _create_ocr_app
-    from tests.test_main import _settings
+    from test_main import _settings
 
     client = TestClient(_create_ocr_app(settings=_settings()))
     response = client.get("/api/health")

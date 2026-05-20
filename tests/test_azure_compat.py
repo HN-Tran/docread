@@ -91,6 +91,7 @@ class FakeBackendRouter:
         expert_table_transformer: bool | None = None,
         expert_word_detector: str | None = None,
         inference_provider: str | None = None,
+        **kwargs: object,
     ) -> Any:
         self.last_call = {
             "backend": backend,
@@ -192,6 +193,7 @@ class FakeBackendRouterWithoutLayout(FakeBackendRouter):
         expert_table_transformer: bool | None = None,
         expert_word_detector: str | None = None,
         inference_provider: str | None = None,
+        **kwargs: object,
     ) -> Any:
         result, selected_backend = await super().run(
             backend=backend,

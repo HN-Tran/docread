@@ -419,7 +419,7 @@ class OCRPipeline:
         storyboard_frames: list[Image.Image] = []
         for frame_index in frame_indices:
             with Image.open(BytesIO(prepared_images[frame_index])) as frame_image:
-                storyboard_frames.append(_flatten_to_rgb(frame_image))
+                storyboard_frames.append(_flatten_to_rgb(frame_image).copy())
 
         columns = 2 if len(storyboard_frames) > 2 else len(storyboard_frames)
         rows = (len(storyboard_frames) + columns - 1) // columns
