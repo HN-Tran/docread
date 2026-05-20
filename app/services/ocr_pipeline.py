@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import cast
 
 import pypdfium2 as pdfium
-from PIL import Image, ImageOps
+from PIL import Image
 
 from app.schemas import SCHEMA_REGISTRY
-from app.services.deskew import deskew_image
+from app.services.deskew import apply_exif_orientation, deskew_image
 from app.services.inference import InferenceError
 from app.services.inference.protocol import VisionLlmClient
 from app.services.inference.registry import VisionClientRegistry
@@ -225,7 +225,7 @@ class OCRPipeline:
         default_token_limit: int,
         max_image_dim: int,
         binarized_min_dim: int = 1800,
-        deskew_enabled: bool = False,
+        deskew_enabled: bool = True,
         deskew_min_angle_deg: float = 0.5,
     ) -> None:
         if default_token_limit < 1:
@@ -274,15 +274,17 @@ class OCRPipeline:
     ) -> tuple[bytes, list[str], dict[str, object]]:
         warnings: list[str] = []
         with Image.open(BytesIO(image_bytes)) as opened:
-            rotated: Image.Image = ImageOps.exif_transpose(opened)
+            rotated, exif_ccw = apply_exif_orientation(opened)
             original_mode = rotated.mode
             image = _flatten_to_rgb(rotated)
 
-            detected_angle = 0.0
-            if self.deskew_enabled:
-                image, detected_angle = deskew_image(image, min_angle_deg=self.deskew_min_angle_deg)
-                if detected_angle != 0.0:
-                    warnings.append(f"Deskew: {detected_angle:.1f}° CCW Korrektur angewendet")
+            detected_angle = exif_ccw
+            if exif_ccw != 0.0:
+                warnings.append(f"EXIF-Orientierung: {exif_ccw:.0f}° CCW angewendet")
+            image, deskew_ccw = deskew_image(image, min_angle_deg=self.deskew_min_angle_deg)
+            detected_angle += deskew_ccw
+            if deskew_ccw != 0.0:
+                warnings.append(f"Deskew: {deskew_ccw:.1f}° CCW Korrektur angewendet")
 
             # Schritt 1: bitonale/Grauwert-Eingaben hochskalieren, BEVOR wir
             # an die max_image_dim-Grenze kommen — sonst geht der Vorteil
@@ -312,7 +314,7 @@ class OCRPipeline:
                     page_number=page_number,
                     width=image.width,
                     height=image.height,
-                    angle=detected_angle,
+                    angle=round(detected_angle, 1),
                 ),
             )
 

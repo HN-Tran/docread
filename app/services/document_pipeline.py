@@ -19,7 +19,11 @@ from typing import Any, cast
 from PIL import Image
 from rapidfuzz import fuzz
 
-from app.services.deskew import deskew_image, detect_cardinal_rotation
+from app.services.deskew import (
+    apply_exif_orientation,
+    detect_cardinal_rotation,
+    deskew_image,
+)
 from app.services.inference import InferenceError
 from app.services.inference.protocol import VisionLlmClient
 from app.services.inference.registry import VisionClientRegistry
@@ -890,20 +894,27 @@ class DocumentPipeline:
             warnings.append(word_detector_warning)
 
         # Prepare pages (PDF or single image)
-        pages: list[tuple[Image.Image, bytes]] = []
+        pages: list[tuple[Image.Image, bytes, float]] = []
         raw_page_images: list[bytes] | None = None
         if content_type == "application/pdf":
             rendered_pages, pdf_warnings = self.direct_pipeline._render_pdf_pages(image_bytes)
             warnings.extend(pdf_warnings)
             raw_page_images = list(rendered_pages)
             for page_bytes in rendered_pages:
-                pages.append((Image.open(io.BytesIO(page_bytes)).convert("RGB"), page_bytes))
+                with Image.open(io.BytesIO(page_bytes)) as opened:
+                    page_image, exif_ccw = apply_exif_orientation(opened)
+                    page_image = page_image.convert("RGB")
+                pages.append((page_image, page_bytes, exif_ccw))
         else:
-            pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+            with Image.open(io.BytesIO(image_bytes)) as opened:
+                pil_img, exif_ccw = apply_exif_orientation(opened)
+                pil_img = pil_img.convert("RGB")
             buf = io.BytesIO()
             pil_img.save(buf, format="PNG")
             png_bytes = buf.getvalue()
-            pages.append((pil_img, png_bytes))
+            pages.append((pil_img, png_bytes, exif_ccw))
+            if exif_ccw != 0.0:
+                warnings.append(f"EXIF-Orientierung: {exif_ccw:.0f}° CCW angewendet")
             if content_type in {"image/tif", "image/tiff", "image/x-tiff"}:
                 raw_page_images = [png_bytes]
 
@@ -914,29 +925,29 @@ class DocumentPipeline:
         layout: list[dict[str, object]] = []
         all_page_texts: list[str] = []
         page_infos: list[dict[str, object]] = []
-        for page_idx, (page_image, page_bytes) in enumerate(pages):
+        for page_idx, (page_image, page_bytes, exif_ccw) in enumerate(pages):
             page_number = page_idx + 1
 
             # Page-level deskew: correct cardinal rotation and fine skew before
             # layout detection so regions are detected on a straight image.
-            page_angle = 0.0
-            if self.deskew_enabled:
-                try:
-                    page_image, page_angle = await asyncio.to_thread(
-                        deskew_image,
-                        page_image,
-                        min_angle_deg=self.deskew_min_angle_deg,
+            page_angle = exif_ccw
+            try:
+                page_image, deskew_ccw = await asyncio.to_thread(
+                    deskew_image,
+                    page_image,
+                    min_angle_deg=self.deskew_min_angle_deg,
+                )
+                page_angle += deskew_ccw
+                if deskew_ccw != 0.0:
+                    buf = io.BytesIO()
+                    page_image.save(buf, format="PNG")
+                    page_bytes = buf.getvalue()
+                    deskew_msg = f"Deskew: {deskew_ccw:.1f}° CCW Korrektur angewendet"
+                    warnings.append(
+                        f"Seite {page_number}: {deskew_msg}" if len(pages) > 1 else deskew_msg
                     )
-                    if page_angle != 0.0:
-                        buf = io.BytesIO()
-                        page_image.save(buf, format="PNG")
-                        page_bytes = buf.getvalue()
-                        deskew_msg = f"Deskew: {page_angle:.1f}° CCW Korrektur angewendet"
-                        warnings.append(
-                            f"Seite {page_number}: {deskew_msg}" if len(pages) > 1 else deskew_msg
-                        )
-                except Exception as exc:  # noqa: BLE001
-                    warnings.append(f"Deskew fehlgeschlagen: {exc}")
+            except Exception as exc:  # noqa: BLE001
+                warnings.append(f"Deskew fehlgeschlagen: {exc}")
 
             page_layout, page_text, page_warnings = await self._process_page(
                 page_image,
@@ -972,7 +983,7 @@ class DocumentPipeline:
             page_infos.append(
                 {
                     "page_number": page_number,
-                    "angle": page_angle,
+                    "angle": round(page_angle, 1),
                     "width": page_image.width,
                     "height": page_image.height,
                     "unit": "pixel",
