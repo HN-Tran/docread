@@ -6,6 +6,13 @@ from typing import Sequence
 import httpx
 
 from app.services.inference.errors import InferenceError
+from app.services.inference.vision_probe import (
+    get_cached_vision_probe,
+    guess_vision_from_name,
+    probe_request_body,
+    response_indicates_no_vision,
+    set_cached_vision_probe,
+)
 
 
 class OpenAICompatibleError(InferenceError):
@@ -24,11 +31,13 @@ class OpenAICompatibleClient:
         timeout_s: float,
         api_key: str = "",
         vision_models: Sequence[str] = (),
+        vision_probe: bool = True,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_s = timeout_s
         self.api_key = api_key.strip()
         self._vision_models = tuple(m.strip() for m in vision_models if m.strip())
+        self._vision_probe = vision_probe
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -61,7 +70,48 @@ class OpenAICompatibleClient:
     async def supports_vision(self, model: str) -> bool:
         if self._vision_models:
             return model in self._vision_models
-        return True
+
+        cached = get_cached_vision_probe(self.base_url, model)
+        if cached is not None:
+            return cached
+
+        guessed = guess_vision_from_name(model)
+        if guessed is not None:
+            set_cached_vision_probe(
+                base_url=self.base_url, model=model, supports=guessed
+            )
+            return guessed
+
+        if not self._vision_probe:
+            return True
+
+        supports = await self._probe_vision_support(model)
+        set_cached_vision_probe(base_url=self.base_url, model=model, supports=supports)
+        return supports
+
+    async def _probe_vision_support(self, model: str) -> bool:
+        url = f"{self.base_url}/chat/completions"
+        body = probe_request_body(model=model)
+        async with httpx.AsyncClient(timeout=self.timeout_s) as client:
+            try:
+                response = await client.post(url, json=body, headers=self._headers())
+            except httpx.HTTPError:
+                return False
+        if response.is_success:
+            payload = response.json()
+            choices = payload.get("choices", [])
+            if isinstance(choices, list) and choices:
+                first = choices[0]
+                if isinstance(first, dict):
+                    message = first.get("message", {})
+                    if isinstance(message, dict):
+                        content = message.get("content", "")
+                        if isinstance(content, str) and content.strip():
+                            return True
+            return False
+        return not response_indicates_no_vision(
+            response.status_code, response.text
+        )
 
     async def run_vision_chat(
         self,

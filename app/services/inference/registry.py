@@ -85,6 +85,7 @@ def _client_for_provider(
     timeout_s: float,
     api_key: str,
     vision_models: tuple[str, ...],
+    vision_probe: bool = True,
 ) -> VisionLlmClient:
     if provider_id == "ollama":
         from app.services.inference.ollama import OllamaClient
@@ -98,6 +99,7 @@ def _client_for_provider(
             timeout_s=timeout_s,
             api_key=api_key,
             vision_models=vision_models,
+            vision_probe=vision_probe,
         )
     raise ValueError(f"Unbekannter Inference-Provider '{provider_id}'.")
 
@@ -110,17 +112,24 @@ def create_vision_registry(settings: Settings) -> VisionClientRegistry:
             timeout_s=settings.request_timeout_s,
             api_key=settings.inference_api_key,
             vision_models=settings.inference_vision_models,
+            vision_probe=settings.inference_vision_probe,
         )
     }
     for provider_id, cfg in settings.inference_extra_providers.items():
         if provider_id in clients:
             continue
+        probe_enabled = (
+            settings.inference_vision_probe
+            if cfg.vision_probe is None
+            else cfg.vision_probe
+        )
         clients[provider_id] = _client_for_provider(
             provider_id,
             base_url=cfg.base_url,
             timeout_s=settings.request_timeout_s,
             api_key=cfg.api_key,
             vision_models=cfg.vision_models,
+            vision_probe=probe_enabled,
         )
     return VisionClientRegistry(
         clients=clients,

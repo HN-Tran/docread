@@ -18,6 +18,7 @@ def _settings(*, app_base_path: str = "") -> Settings:
         inference_model="glm-ocr:latest",
         inference_api_key="",
         inference_vision_models=(),
+        inference_vision_probe=True,
         inference_extra_providers={},
         ollama_base_url="http://localhost:11434",
         ollama_model="glm-ocr:latest",

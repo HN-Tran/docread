@@ -40,6 +40,7 @@ export INFERENCE_MODEL="glm-ocr:latest"
 # export INFERENCE_MODEL="your-vision-model"
 # export INFERENCE_API_KEY=""                   # optional Bearer token
 # export INFERENCE_VISION_MODELS="model-a"      # optional comma-separated allowlist for vision_only
+# export INFERENCE_VISION_PROBE="true"          # probe OpenAI-compatible catalogs when allowlist empty
 # export INFERENCE_EXTRA_PROVIDERS='{"openai_compatible":{"base_url":"http://localhost:8000/v1"}}'
 # Legacy aliases (still supported): OLLAMA_BASE_URL, OLLAMA_MODEL
 # API: inference_provider form field; model as provider/model (e.g. openai_compatible/my-vlm)
