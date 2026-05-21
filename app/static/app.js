@@ -597,6 +597,15 @@ function formatConfidence(value) {
   return numericValue.toFixed(2);
 }
 
+function formatRegionAngle(region) {
+  const raw = region?.region_angle;
+  const numericValue = Number(raw);
+  if (!Number.isFinite(numericValue) || Math.abs(numericValue) < 0.05) {
+    return null;
+  }
+  return `${numericValue.toFixed(1)}° CCW`;
+}
+
 function getRegionConfidence(region) {
   if (!region || typeof region !== "object") {
     return null;
@@ -786,15 +795,12 @@ function renderLayoutOverlay(layoutPages, pageIndex) {
     boxEl.dataset.regionKind = regionKind;
     boxEl.dataset.regionIndex = String(index);
     const contentPreview = truncateText(region.content || "", 80);
-    const confidenceValue = getRegionConfidence(region);
-    const confidenceLabel = formatConfidence(confidenceValue);
-    const labelWithConfidence = confidenceLabel ? `${label} (${confidenceLabel})` : label;
-    boxEl.title = contentPreview ? `${labelWithConfidence}: ${contentPreview}` : labelWithConfidence;
+    boxEl.title = contentPreview ? `${label}: ${contentPreview}` : label;
 
     const badgeEl = document.createElement("span");
     badgeEl.className = "preview-layout-badge";
     badgeEl.dataset.regionKind = regionKind;
-    badgeEl.textContent = confidenceLabel ? `${label} ${confidenceLabel}` : label;
+    badgeEl.textContent = label;
     if (polygonPoints) {
       const anchors = getPolygonBadgeAnchors(polygonPoints);
       if (anchors && percentages.width > 0 && percentages.height > 0) {
@@ -1304,6 +1310,14 @@ function renderLayoutPanel(layoutPages, visualizations, activePageIndex = null) 
         confidenceEl.className = "layout-region-confidence";
         confidenceEl.textContent = confidenceLabel;
         regionHeadEl.appendChild(confidenceEl);
+      }
+
+      const angleLabel = formatRegionAngle(region);
+      if (angleLabel) {
+        const angleEl = document.createElement("span");
+        angleEl.className = "layout-region-angle";
+        angleEl.textContent = angleLabel;
+        regionHeadEl.appendChild(angleEl);
       }
 
       const metaEl = document.createElement("span");

@@ -632,6 +632,7 @@ class DocumentPipeline:
         regions = _sort_reading_order(raw_regions)
 
         # 3. Build layout regions — crop OCR each, fuzzy-match against source text.
+        _REGION_PAGE_AREA_SKIP = 0.40
         layout_regions: list[dict[str, object]] = []
         for idx, region in enumerate(regions):
             task_type = region.get("task_type", "text")
@@ -652,6 +653,42 @@ class DocumentPipeline:
                 layout_region["content"] = ""
             else:
                 precomputed_crop: bytes | None = None
+                region_crop_img: Image.Image | None = None
+                region_area_frac = self._region_page_area_fraction(
+                    image, cast(list[float], region.get("bbox_2d", [0, 0, 0, 0]))
+                )
+                if self.deskew_enabled and region_area_frac < _REGION_PAGE_AREA_SKIP:
+                    region_crop_img = self._crop_region_image(
+                        image, region.get("bbox_2d", [0, 0, 0, 0])
+                    )
+                    if region_crop_img is not None:
+                        try:
+                            corrected_crop, region_net = await asyncio.to_thread(
+                                deskew_image,
+                                region_crop_img,
+                                min_angle_deg=self.deskew_min_angle_deg,
+                                allow_page_cardinal=True,
+                                deskew_context="region",
+                                debug_label=f"region {idx}",
+                            )
+                            region_crop_img = corrected_crop
+                            if region_net != 0.0:
+                                buf = io.BytesIO()
+                                corrected_crop.save(buf, format="PNG")
+                                precomputed_crop = buf.getvalue()
+                                shown = normalize_ccw_angle(region_net)
+                                layout_region["region_angle"] = round(shown, 1)
+                                if abs(region_net) >= self.deskew_min_angle_deg:
+                                    warnings.append(
+                                        f"Region {idx} ({label}): {shown:.1f}° CCW "
+                                        "Korrektur erkannt"
+                                    )
+                            for line in consume_deskew_debug_trace():
+                                warnings.append(f"Region {idx} deskew debug: {line}")
+                        except Exception as exc:  # noqa: BLE001
+                            warnings.append(
+                                f"Region {idx} Deskew fehlgeschlagen: {exc}"
+                            )
 
                 try:
                     candidate = await self._ocr_region(
@@ -671,7 +708,9 @@ class DocumentPipeline:
 
                 # Table Transformer: detect precise cell bboxes for table regions.
                 if task_type == "table" and use_table_transformer:
-                    crop_img = self._crop_region_image(image, region.get("bbox_2d", [0, 0, 0, 0]))
+                    crop_img = region_crop_img or self._crop_region_image(
+                        image, region.get("bbox_2d", [0, 0, 0, 0])
+                    )
                     if crop_img is not None:
                         try:
                             raw_cells = self._get_table_recognizer().recognize(crop_img)
