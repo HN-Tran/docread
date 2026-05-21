@@ -1,9 +1,11 @@
 .bench-page {
+  min-height: 100vh;
   max-width: 1200px;
   margin: 0 auto;
   padding: 1.6rem;
   display: grid;
   gap: 1.2rem;
+  align-content: start;
 }
 
 .bench-head {
@@ -41,6 +43,7 @@
   padding: 1.2rem;
   display: grid;
   gap: 0.85rem;
+  box-shadow: var(--shadow);
 }
 
 .bench-config h2,
@@ -118,11 +121,11 @@
   padding: 0.4rem 0.55rem;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: var(--bg);
+  background: var(--pre-bg);
 }
 
 .bench-file-row-zip {
-  background: color-mix(in srgb, var(--accent, #3b82f6) 5%, var(--bg));
+  background: color-mix(in srgb, var(--accent, #3b82f6) 5%, var(--pre-bg));
   border-color: color-mix(in srgb, var(--accent, #3b82f6) 30%, transparent);
 }
 
@@ -261,7 +264,7 @@
   padding: 0.3rem 0.45rem;
   border: 1px solid var(--line);
   border-radius: 4px;
-  background: var(--bg);
+  background: var(--pre-bg);
   color: var(--ink);
   font: inherit;
   font-size: 0.82rem;
@@ -300,7 +303,7 @@
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 0.55rem 0.7rem;
-  background: var(--bg);
+  background: var(--pre-bg);
   font-size: 0.78rem;
 }
 
@@ -397,7 +400,7 @@
   grid-template-columns: 1fr 1fr;
   gap: 0.75rem;
   padding: 0.75rem 0.55rem;
-  background: color-mix(in srgb, var(--panel) 60%, var(--bg));
+  background: color-mix(in srgb, var(--panel) 60%, var(--pre-bg));
 }
 
 .bench-detail-section {
@@ -420,7 +423,7 @@
   word-break: break-word;
   max-height: 12rem;
   overflow-y: auto;
-  background: var(--bg);
+  background: var(--pre-bg);
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 0.4rem 0.5rem;
@@ -432,7 +435,7 @@
   line-height: 1.7;
   max-height: 12rem;
   overflow-y: auto;
-  background: var(--bg);
+  background: var(--pre-bg);
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 0.4rem 0.5rem;
