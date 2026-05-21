@@ -533,8 +533,12 @@ def _apply_landscape_flip_if_needed(img: Image.Image) -> tuple[Image.Image, floa
     return img, 0.0
 
 
-def _skip_landscape_flip_after_cardinal(cardinal_ccw: int, *, cardinal_branch: str) -> bool:
+def _skip_landscape_flip_after_cardinal(
+    cardinal_ccw: int, *, cardinal_branch: str, deskew_context: str = "page"
+) -> bool:
     """OSD and quarter-turn picks already encode upright; extra 180° flips mis-rotate."""
+    if deskew_context == "region":
+        return True
     if cardinal_branch in {"tesseract_osd", "page_cardinal_disabled"}:
         return True
     if cardinal_ccw in (90, 270):
@@ -548,6 +552,7 @@ def _deskew_from_cardinal(
     *,
     min_angle_deg: float,
     cardinal_branch: str = "",
+    deskew_context: str = "page",
 ) -> tuple[Image.Image, float]:
     """Apply one cardinal rotation, then fine skew and optional 180° flip."""
     _deskew_debug("cardinal_apply", cardinal_ccw=cardinal_ccw, branch=cardinal_branch)
@@ -559,10 +564,13 @@ def _deskew_from_cardinal(
 
     if cardinal_ccw == 180:
         _deskew_debug("landscape_flip_skip", reason="cardinal_already_180")
-    elif _skip_landscape_flip_after_cardinal(cardinal_ccw, cardinal_branch=cardinal_branch):
+    elif _skip_landscape_flip_after_cardinal(
+        cardinal_ccw, cardinal_branch=cardinal_branch, deskew_context=deskew_context
+    ):
+        reason = "region_after_page" if deskew_context == "region" else "authoritative_cardinal"
         _deskew_debug(
             "landscape_flip_skip",
-            reason="authoritative_cardinal",
+            reason=reason,
             branch=cardinal_branch,
             cardinal_ccw=cardinal_ccw,
         )
@@ -960,6 +968,7 @@ def deskew_image(
     cardinal_confidence_threshold: float = 0.70,
     debug_label: str | None = None,
     allow_page_cardinal: bool = True,
+    deskew_context: str = "page",
 ) -> tuple[Image.Image, float]:
     """Straighten a page: quarter-turn (0/90/180/270), then fine skew in degrees.
 
@@ -969,8 +978,8 @@ def deskew_image(
     Returns ``(corrected_image, net_ccw_correction)`` for ``page_info["angle"]``.
     Does not read or apply EXIF tags.
 
-    Set ``allow_page_cardinal=False`` for expert/layout pipelines that should keep
-    the scan upright and correct orientation per layout region instead.
+    ``deskew_context="region"`` is for layout crops after page deskew: cardinal OSD
+    still runs, but landscape 180° flip is skipped so crops are not double-rotated.
 
     When ``DESKEW_DEBUG=1``, pass ``debug_label`` (e.g. ``"page 1"``) to tag log lines.
     """
@@ -991,6 +1000,7 @@ def deskew_image(
             cardinal_ccw,
             min_angle_deg=min_angle_deg,
             cardinal_branch=cardinal_branch,
+            deskew_context=deskew_context,
         )
         _deskew_debug(
             "done",

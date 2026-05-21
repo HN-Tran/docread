@@ -74,6 +74,26 @@ def test_tesseract_osd_branch_skips_landscape_flip(monkeypatch) -> None:
     assert not any("landscape_flip_apply" in line for line in trace)
 
 
+def test_region_deskew_skips_landscape_flip_on_fine_skew_only(monkeypatch) -> None:
+    """Region crops after page deskew: fine skew must not trigger +180° landscape flip."""
+    monkeypatch.setenv("DESKEW_DEBUG", "1")
+    monkeypatch.setattr(
+        "app.services.deskew._osd_cardinal_ccw",
+        lambda _img, **kwargs: 0,
+    )
+    skewed = _text_image().rotate(-5, expand=True, fillcolor="white")
+    _, net = deskew_image(
+        skewed,
+        allow_page_cardinal=True,
+        deskew_context="region",
+        debug_label="region 0",
+    )
+    trace = consume_deskew_debug_trace()
+    assert 4.0 <= abs(net) <= 6.0, net
+    assert any("region_after_page" in line for line in trace)
+    assert not any("landscape_flip_apply" in line for line in trace)
+
+
 def test_page_deskew_applies_fine_skew_after_osd_quarter_turn(monkeypatch) -> None:
     """After OSD 90°, residual scanner tilt (~5°) should appear in net_ccw."""
     monkeypatch.setattr(
