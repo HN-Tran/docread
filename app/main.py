@@ -101,6 +101,7 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
         text_anchor_threshold=settings.ocr_expert_text_anchor_threshold,
         word_detector=_try_create_word_detector(settings.ocr_word_detector),
         layout_max_dim=settings.ocr_expert_layout_max_dim,
+        deskew_page_cardinal=settings.deskew_page_cardinal,
     )
     ocr_backend_router = OCRBackendRouter(
         default_backend=settings.ocr_backend,
