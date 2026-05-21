@@ -1,20 +1,30 @@
 [English](README.md) · [Deutsch](README_DE.md)
 
-# docread (FastAPI + austauschbare Vision-LLMs)
+# docread
 
-Dokument-OCR-Dienst mit Vision-Sprachmodellen über ein FastAPI-Backend. Standard ist Ollama; alternativ OpenAI-kompatible Server (llama.cpp, vLLM, …). Inklusive schlanker Weboberfläche und Evaluations-Runner.
+<p align="center">
+  <a href="https://github.com/HN-Tran/docread/actions/workflows/ci.yml"><img src="https://github.com/HN-Tran/docread/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/HN-Tran/docread/releases"><img src="https://img.shields.io/github/v/release/HN-Tran/docread?label=release" alt="Release"></a>
+  <a href="https://github.com/HN-Tran/docread/blob/master/LICENSE"><img src="https://img.shields.io/github/license/HN-Tran/docread" alt="Lizenz"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.12%2B-blue?logo=python&logoColor=white" alt="Python 3.12+"></a>
+  <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white" alt="FastAPI"></a>
+  <a href="docker-compose.yml"><img src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white" alt="Docker Compose"></a>
+</p>
+
+<p align="center"><strong>Selbst gehostete Dokument-OCR mit Vision-Sprachmodellen</strong></p>
+
+<p align="center">
+  Scans und PDFs auf eigener Infrastruktur auswerten. Ollama oder ein OpenAI-kompatibles Vision-Modell,
+  Vorschau im Browser, Vergleich mit Azure oder Google Vision und Benchmarks mit optionalem Referenztext.
+</p>
 
 ## Funktionen
 
-- `POST /api/ocr` für Klartext- oder strukturierte Extraktion
-- `POST /api/compare` für Side-by-Side-Vergleich gegen externe Engines (Azure, docread-Peer, Google Vision, Plain-Text-Endpoint) inklusive Metriken-Panel und optionalem CER/WER gegen Referenztext
-- `POST /api/benchmark` für Batch-Benchmarks (N Dateien × M Runner) mit Live-Progress, CSV-Export und optionalem MLflow-Tracking
-- `GET /api/models` zum Auflisten der Modelle des konfigurierten Inference-Providers
-- `GET /api/schemas` zum Anzeigen unterstützter strukturierter Schemata
-- `GET /docs` (Swagger UI) und `GET /redoc` (ReDoc) für die interaktive API-Dokumentation
-- Browser-UI unter `/` mit zentrierter Startkarte, Drag-and-Drop-Upload, Auto-Run bei Dateiauswahl, Expertenoptionen, schnellen JSON-Vorgaben (Rechnung, Beleg, Tabelle, Visitenkarte), Hell/Dunkel-Modus, Bild/PDF-Vorschau, JSON-Highlighting und CSV-Download für Tabellen
-- Wort-Polygon-Overlay im Layout-Viewer (`OCR_WORD_DETECTOR=paddleocr|doctr`): wortgenaue Bounding-Polygone pro Layout-Region
-- Evaluations-Runner mit CER/WER und Feldgenauigkeit
+- REST-API mit **Swagger UI** unter `/docs`, **ReDoc** unter `/redoc` und **`/openapi.json`**; Weboberfläche unter `/` für Dokument-OCR (Klartext oder strukturiertes JSON aus Bild, PDF und Word).
+- **Direct-Modus** für schnelle ganzseitige OCR mit Ollama oder einem OpenAI-kompatiblen Vision-Modell auf eigener Infrastruktur.
+- **Dev-Modus** mit Layout-Regionen, Tabellenzellen, Wortboxen und automatischem Deskew bei Kamerascans.
+- **Vergleich und Benchmark** gegen Azure, Google Vision, eine andere docread-Instanz oder einen eigenen HTTP-Endpunkt; optional CER/WER mit Referenztext.
+- Offline-**Evaluation** auf einem festen Samplesatz, um Regressionen zu erkennen.
 
 ## Anforderungen
 
@@ -28,46 +38,120 @@ Dokument-OCR-Dienst mit Vision-Sprachmodellen über ein FastAPI-Backend. Standar
 uv sync --all-groups
 ```
 
-Optionale Umgebungsvariablen:
+### Konfiguration
 
-```bash
-export INFERENCE_PROVIDER="ollama"              # ollama | openai_compatible
-export INFERENCE_BASE_URL="http://localhost:11434"
-export INFERENCE_MODEL="glm-ocr:latest"
-# OpenAI-kompatibel (vLLM / llama.cpp):
-# export INFERENCE_PROVIDER="openai_compatible"
-# export INFERENCE_BASE_URL="http://localhost:8000/v1"
-# export INFERENCE_MODEL="dein-vision-modell"
-# Legacy-Aliase: OLLAMA_BASE_URL, OLLAMA_MODEL
-export OCR_BACKEND="direct" # direct | expert
-export OCR_EXPERT_MODE="selfhosted"
-export OCR_EXPERT_ENABLE_LAYOUT="true"
-export OCR_EXPERT_LAYOUT_MODEL="PaddlePaddle/PP-DocLayoutV3_safetensors"
-export OCR_WORD_DETECTOR="none"         # none | paddleocr | doctr
-export OCR_EXPERT_OCR_API_HOST="localhost"
-export OCR_EXPERT_OCR_API_PORT="11434"
-export ANALYZE_STORE_DIR="/tmp/docread-analyze-results"
-export DEFAULT_TOKEN_LIMIT="16384"
-export MAX_UPLOAD_BYTES="8388608"
-export MAX_IMAGE_DIM="2048"               # Obergrenze für OCR-Bildgröße
-export OCR_EXPERT_LAYOUT_MAX_DIM="1800"   # Layout-Detektor sieht max. so groß
-export OCR_BINARIZED_MIN_DIM="1800"       # 1-bit/L-Eingaben werden mind. so groß
-export BENCHMARK_MAX_FILES="50"          # /api/benchmark Hard-Cap
-export BENCHMARK_MAX_RUNNERS="5"         # /api/benchmark Hard-Cap
-export MLFLOW_TRACKING_URI=""            # leer = kein Tracking; HTTP- oder file:-URI
-export MLFLOW_EXPERIMENT_NAME="docread"
-```
+[`.env.example`](.env.example) nach `.env` kopieren für Docker Compose. Die Standardwerte entsprechen `app/config.py`, sofern nicht anders angegeben.
 
-Eingabe-Preprocessing (in `app/services/ocr_pipeline.py`):
+#### Inference (Vision-LLM)
+
+| Variable | Standard | Beschreibung |
+|----------|----------|--------------|
+| `INFERENCE_PROVIDER` | `ollama` | `ollama` oder `openai_compatible` (vLLM, llama.cpp, …). Details: [`docs/inference-providers.md`](docs/inference-providers.md). |
+| `INFERENCE_BASE_URL` | `http://localhost:11434` | API-Basis-URL. Fallback: `OLLAMA_BASE_URL`. |
+| `INFERENCE_MODEL` | `glm-ocr:latest` | Standardmodell, wenn der Request kein `model` setzt. Fallback: `OLLAMA_MODEL`. |
+| `INFERENCE_API_KEY` | *(leer)* | Optionales Bearer-Token für OpenAI-kompatible Server. |
+| `INFERENCE_VISION_MODELS` | *(leer)* | Kommagetrennte Allowlist für `GET /api/models?vision_only=true`. |
+| `INFERENCE_VISION_PROBE` | `true` | OpenAI-kompatibles `/models` abfragen, wenn die Allowlist leer ist. |
+| `INFERENCE_EXTRA_PROVIDERS` | *(leer)* | JSON-Karte zusätzlicher Provider. |
+| `DEFAULT_TOKEN_LIMIT` | `16384` | Standard-Ollama-`num_ctx` / Kontextlimit (`1..128000`). |
+| `REQUEST_TIMEOUT_S` | `120` | HTTP-Timeout für Inference-Aufrufe (Sekunden). |
+| `VERIFY_SSL` | `false` | TLS-Zertifikatsprüfung für Inference-HTTP-Clients. |
+
+Legacy-Aliase `OLLAMA_BASE_URL` und `OLLAMA_MODEL` funktionieren weiter. Pro Request: Formularfeld `inference_provider`; Modell als `provider/model` (z. B. `openai_compatible/my-vlm`).
+
+OpenAI-kompatibles Beispiel (GLM-OCR per Docker: [`docs/llamacpp-docker-glm-ocr.md`](docs/llamacpp-docker-glm-ocr.md)):
+
+| Variable | Beispiel |
+|----------|----------|
+| `INFERENCE_PROVIDER` | `openai_compatible` |
+| `INFERENCE_BASE_URL` | `http://localhost:8080/v1` |
+| `INFERENCE_MODEL` | `GLM-OCR-Q8_0.gguf` |
+
+#### OCR-Backends
+
+| Variable | Standard | Beschreibung |
+|----------|----------|--------------|
+| `OCR_BACKEND` | `expert` | `direct` (Ganzseiten-OCR) oder `expert` (Dev: Layout + Regions-OCR). UI: **Direct** / **Dev**. |
+| `OCR_EXPERT_ENABLE_LAYOUT` | `true` | Layout-Erkennung im Dev-Modus. |
+| `OCR_EXPERT_LAYOUT_MODEL` | `PaddlePaddle/PP-DocLayoutV3_safetensors` | Hugging-Face-Layout-Modell (`HFLayoutDetector`). |
+| `OCR_EXPERT_LAYOUT_DEVICE` | `auto` | `auto`, `cpu`, `cuda` oder `mps` für Layout-Inferenz. |
+| `OCR_EXPERT_LAYOUT_THRESHOLD` | *(pro Modell)* | Optionale globale Konfidenz (`0..1`); pro Request überschreibbar. |
+| `OCR_EXPERT_LAYOUT_MAX_DIM` | `1800` | Lange Kante für Layout-Detektion (Boxen zurück auf Volauflösung). |
+| `OCR_EXPERT_TABLE_TRANSFORMER` | `false` | Microsoft Table Transformer für Tabellenzellen. |
+| `OCR_EXPERT_PER_REGION_OCR` | `true` | OCR pro Layout-Region (aus = nur Layout, schneller). |
+| `OCR_EXPERT_TEXT_ANCHOR` | `true` | Regions-OCR per Fuzzy-Match an Ganzseiten-Text anbinden. |
+| `OCR_EXPERT_TEXT_ANCHOR_THRESHOLD` | `60` | RapidFuzz-Schwellwert fürs Text-Anchoring. |
+| `OCR_EXPERT_COMPARE_INCLUDE_DETECTOR_ONLY` | `false` | Detektor-only-Wörter im Compare-Diff einbeziehen. |
+| `OCR_WORD_DETECTOR` | `doctr` | Wort-Polygone: `none`, `paddleocr` oder `doctr`. |
+
+#### Scan-Deskew
+
+| Variable | Standard | Beschreibung |
+|----------|----------|--------------|
+| `DESKEW_ENABLED` | `true` | Seiten vor OCR/Layout begradigen. |
+| `DESKEW_PAGE_CARDINAL` | `true` | Vierteldrehung auf Content-BBox-Probe (Rand-Scans). |
+| `DESKEW_OSD` | `1` | Tesseract-OSD auf der Probe (benötigt `pytesseract`; im Docker-Image). |
+| `DESKEW_OSD_MIN_CONFIDENCE` | `1.0` | Mindest-OSD-Konfidenz für Kardinal-Hinweis. |
+| `DESKEW_FINE_SCAN_DIM` | `2400` | Max. Dimension für gekachelte Fein-Skew-Suche. |
+| `DESKEW_MIN_ANGLE_DEG` | `0.5` | Korrekturen unter diesem Winkel ignorieren (Grad). |
+| `DESKEW_CONTENT_BBOX_MAX_FILL` | `0.72` | Ganzseiten-Probe, wenn Tintenfüllung darüber liegt. |
+| `DESKEW_QUARTER_TURN` | `auto` | Erzwingen: `90`, `270`, `-90` oder `auto`. |
+| `DESKEW_DEBUG` | `0` | Deskew-Entscheidungen in Logs und OCR-`warnings` protokollieren. |
+
+#### Upload-Limits & Preprocessing
+
+| Variable | Standard | Beschreibung |
+|----------|----------|--------------|
+| `MAX_UPLOAD_BYTES` | `8388608` | Maximale Upload-Größe (8 MiB). |
+| `MAX_IMAGE_DIM` | `3600` | Max. lange Kante nach dem Laden (Pixel). |
+| `OCR_BINARIZED_MIN_DIM` | `1800` | 1-bit-/Graustufen-Eingaben mindestens auf diese Größe hochskalieren. |
+| `ANALYZE_STORE_DIR` | `/tmp/docread-analyze-results` | Persistierte Azure-kompatible Analyze-Ergebnisse. |
+
+#### Compare-Presets (optional)
+
+| Variable | Standard | Beschreibung |
+|----------|----------|--------------|
+| `AZURE_PRESET_LABEL` | *(leer)* | Label für Azure-Schnellbutton in der UI. |
+| `AZURE_PRESET_ENDPOINT` | *(leer)* | Azure-Endpoint-URL für dieses Preset. |
+| `AZURE_PRESET_LAYOUT_ENDPOINT` | *(leer)* | Optionales zweites Preset (Layout-Modell). |
+| `AZURE_PRESET_KEY` | *(leer)* | Serverseitiger Key, wenn die UI die Preset-URL ohne Key aufruft. |
+
+#### Benchmark & MLflow
+
+| Variable | Standard | Beschreibung |
+|----------|----------|--------------|
+| `BENCHMARK_MAX_FILES` | `50` | Max. Dateien pro Benchmark-Job. |
+| `BENCHMARK_MAX_RUNNERS` | `5` | Max. Runner (Modelle + Engines) pro Job. |
+| `BENCHMARK_JOB_TTL_S` | `3600` | In-Memory-Aufbewahrung von Jobs (Sekunden). |
+| `MLFLOW_TRACKING_URI` | *(leer)* | z. B. `http://mlflow:5000` oder `file:./mlruns`; leer = aus. |
+| `MLFLOW_EXPERIMENT_NAME` | `docread` | MLflow-Experimentname. |
+
+#### Anwendung
+
+| Variable | Standard | Beschreibung |
+|----------|----------|--------------|
+| `APP_LOCALE` | `en` | UI-Sprache: `en` oder `de`. |
+| `APP_BASE_PATH` | *(leer)* | URL-Präfix hinter einem Reverse-Proxy. |
+| `HOST` | `127.0.0.1` | Bind-Adresse für `uvicorn`. |
+| `PORT` | `8000` | Port für `uvicorn`. |
+
+### Eingabe-Preprocessing und Deskew
+
+Gemeinsame Schritte (`app/services/ocr_pipeline.py`, `app/services/deskew.py`):
 
 - RGBA/LA und transparente Palette-PNGs werden auf **weißem** Hintergrund komponiert (vermeidet schwarze Defaults, die schwarzen Text auf transparentem Hintergrund unsichtbar machen würden).
-- Bitonale (`1`) und Graustufen (`L`) Eingaben werden auf mindestens
-  `OCR_BINARIZED_MIN_DIM` Pixel (Standard 1800) hochskaliert, damit Modelle
-  „l"/„I"/„1" zuverlässiger unterscheiden können.
-- Im Expert-Backend wird das Bild vor dem Layout-Detektor zusätzlich auf
-  `OCR_EXPERT_LAYOUT_MAX_DIM` (Standard 1800) heruntergeskaliert. Die
-  Bounding-Boxes werden danach wieder auf die Originalauflösung skaliert,
-  sodass die Per-Region-OCR weiterhin auf dem hochaufgelösten Bild arbeitet.
+- Bitonale (`1`) und Graustufen (`L`) Eingaben werden auf mindestens `OCR_BINARIZED_MIN_DIM` Pixel (Standard 1800) hochskaliert, damit Modelle „l"/„I"/„1" zuverlässiger unterscheiden können.
+- Bei `DESKEW_ENABLED=true` (Standard) wird jede Seite **vor** der OCR begradigt. Vierteldrehungen nutzen eine Content-BBox-Probe (hilfreich bei A4-Scans mit Rand); Fein-Skew nutzt gekachelte Projektionssuche auf großen Seiten. Optional `DESKEW_OSD=1` ergänzt Tesseract-OSD auf der Probe (benötigt `pytesseract`, im Docker-Image über das `osd`-Extra enthalten).
+- PDF-`/Rotate`-Metadaten werden beim Rendern in Pixel übernommen, bevor Deskew läuft.
+
+**Dev-Backend** (`app/services/document_pipeline.py`):
+
+- Zuerst Seiten-Deskew; der Layout-Detektor sieht das korrigierte Preview (herunterskaliert auf `OCR_EXPERT_LAYOUT_MAX_DIM`, Standard 1800, Boxen danach auf volle Auflösung für Crops).
+- Regionen unter 40 % der Seitenfläche können zusätzlich ein Regions-Deskew auf dem Crop vor der OCR erhalten.
+- `page_infos[].angle` und Azure `pages[].angle` melden die **angewendete CCW-Korrektur** der Seite (0 wenn keine).
+- Pro Layout-Region optional: `angle` (Neigung im **Original**-Scan), `preview_angle` (= Original − Seitenkorrektur), `deskew_correction_ccw` (zusätzliche CCW auf dem Regions-Crop).
+
+OSD lokal installieren: `uv sync --extra osd` oder `pip install '.[osd]'`.
 
 ## Starten
 
@@ -78,6 +162,8 @@ uv run uvicorn app.main:app --reload
 Öffnen: `http://127.0.0.1:8000`
 
 ## API
+
+Interaktive Referenz (maßgeblich für Request-Felder und Typen): [`/docs`](http://127.0.0.1:8000/docs) (Swagger UI), [`/redoc`](http://127.0.0.1:8000/redoc) und [`/openapi.json`](http://127.0.0.1:8000/openapi.json). Strukturierte Schema-Namen: `GET /api/schemas`.
 
 `POST /api/ocr` akzeptiert entweder `multipart/form-data` oder einen rohen Body mit
 `Content-Type: application/octet-stream`.
@@ -101,31 +187,14 @@ Kompatibilitäts-Hinweise:
 - `pages` und `stringIndexType` werden akzeptiert; `pages` filtert aktuell nur das Antwort-Payload, nicht die eigentliche OCR-Ausführung.
 - `modelId` ist auf `prebuilt-read` begrenzt.
 - `pages`, `paragraphs`, `lines`, `words` und `spans` werden jetzt best-effort aus OCR-Text und Layoutdaten gefüllt. `textElements` bleibt dabei eine pragmatische Annäherung, keine vollständige Grapheme-Cluster-Implementierung.
+- `pages[].angle` meldet die angewendete **CCW-Korrektur** der Seite bei aktivem Deskew (wie natives `page_infos[].angle`, nicht Azures Uhrzeigersinn-Semantik).
 - `pages[].words` nutzt — sobald `OCR_WORD_DETECTOR=doctr|paddleocr` aktiv ist und der Detektor Wort-Polygone geliefert hat — die echten Detektor-Boxen (gleiche Daten wie der „Wörter"-Tab im Browser) statt der synthetischen Wort-Wrapper aus den Layout-Regionen. Ohne Detektor bleibt der bisherige Fallback erhalten.
 
-Multipart-Felder:
+#### `POST /api/ocr`
 
-- `file`: Bild, PDF oder Word-Dokument (`image/png`, `image/jpeg`, `image/webp`, `image/gif`, `image/tif`, `image/tiff`, `image/x-tiff`, `application/pdf`, `application/msword`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`)
-- `mode`: `plain` oder `structured`
-- `schema_name`: erforderlich bei `mode=structured`
-- `backend`: optional `direct` oder `expert` (UI: Direct/Dev, Standard aus `OCR_BACKEND`)
-- `model`: optionale Modell-Überschreibung
-- `token_limit`: optionale Token-/Kontextgrenze (`1..128000`), wird als Ollama-`num_ctx` gesetzt
-- `gif_max_frames`: optionales Frame-Limit für animierte GIFs (`1..32`, Standard: `8`)
-- `expert_enable_layout`: optionales Layout-Override für `backend=expert` (`true|false`)
-- `task`: Klartext-Aufgabenpreset (`ocr_text`, `describe_image`, `read_scene_text`, `extract_table_markdown`, `summarize_document`)
-- `custom_prompt`: optionaler Klartext-Prompt, hat Vorrang vor `task`
+Pflicht: Datei-Bytes — Multipart-Feld `file` oder roher Body `application/octet-stream`. Bei `mode=structured` zusätzlich `schema_name`. Alle übrigen Felder (`backend`, `model`, `task`, `expert_*`, …) sind optionale Overrides; die vollständige Liste steht in der OpenAPI.
 
-Raw-Upload (`application/octet-stream`):
-
-- Der Request-Body enthält direkt die Datei-Bytes.
-- `mode`, `schema_name`, `backend`, `model`, `token_limit`, `gif_max_frames`,
-  `expert_enable_layout`, `task` und `custom_prompt` können als Query-Parameter
-  übergeben werden.
-- Der Server erkennt `png`, `jpeg`, `webp`, `gif`, `tiff`, `pdf`, `doc` und `docx` anhand der
-  Dateisignatur automatisch. Word-Dokumente werden intern via LibreOffice in PDF konvertiert.
-
-PowerShell-Beispiel:
+Raw-Upload: dieselben optionalen Parameter als Query-Strings. Formaterkennung per Signatur (`png`, `jpeg`, `webp`, `gif`, `tiff`, `pdf`, `doc`, `docx`); Word wird via LibreOffice nach PDF konvertiert.
 
 ```powershell
 Invoke-RestMethod -Method POST `
@@ -134,35 +203,13 @@ Invoke-RestMethod -Method POST `
   -InFile 'C:\path\scan.tiff'
 ```
 
-Beispiele für `schema_name`:
+**Verhalten (in OpenAPI nicht wiederholt)**
 
-- `auto` (Schema wird automatisch erkannt)
-- `invoice_basic`
-- `receipt_basic`
-- `table_basic`
-- `business_card_basic`
+- **Eingaben:** PDF → alle Seiten; animierte GIFs → gesampelte Frames (Standard 8, Obergrenze `gif_max_frames`). `describe_image` bei GIFs in einem Storyboard-Aufruf.
+- **Backends:** `direct` — Vision-LLM pro Seite/Frame, Text im Tab **Text**. `expert` (Dev) — Layout-Pipeline bei `mode=plain` und `task=ocr_text`, sonst Fallback auf Direct. Dev kann `markdown` liefern (UI-Vorschau), `text` bleibt roh.
+- **Dev-Layout:** Hugging-Face-Objekterkennung über `OCR_EXPERT_LAYOUT_MODEL` / `expert_layout_model` (Gewichte, die Sie konfigurieren; nicht mit docread ausgeliefert). Achsenparallele `bbox_2d`-Regionen; optional Table-Transformer-`cells` in Tabellenregionen.
 
-Hinweis: Bei PDF-Dateien werden alle Seiten verarbeitet.
-Hinweis: Animierte GIFs werden als Mehrseiten-Eingabe behandelt; bis zu 8 Frames werden gleichmäßig gesampelt verarbeitet.
-Hinweis: Für `task=describe_image` bei animierten GIFs wird effizient ein Storyboard aus Sample-Frames in einem Einzelaufruf beschrieben.
-Hinweis: `backend=expert` nutzt GLM-OCR primär für `mode=plain` + `task=ocr_text`; für andere Aufgaben fällt die App auf den Direct-Pfad zurück.
-Hinweis: Expert/Dev läuft in dieser App nur im Self-Hosted-Modus (`OCR_EXPERT_MODE=selfhosted`).
-Hinweis: Bei `backend=expert` kann die Antwort zusätzlich `markdown` enthalten; die UI rendert daraus eine sichere Vorschau, behält aber `text` als Rohausgabe bei.
-Hinweis: Das Layout-Modell ist über `OCR_EXPERT_LAYOUT_MODEL` konfigurierbar (Standard: `PaddlePaddle/PP-DocLayoutV3_safetensors`) und kann pro Request via `expert_layout_model` überschrieben werden. PP-DocLayout-Modelle werden direkt von GLM-OCR geladen. Für andere HuggingFace-Object-Detection-Modelle wird automatisch ein generischer Detektor (`HFLayoutDetector`) verwendet, der `AutoModelForObjectDetection` nutzt. YOLO-basierte Modelle werden nicht unterstützt.
-
-Verfügbare Layout-Modelle:
-
-| Modell | Architektur | Polygone | Stärken | Einschränkungen |
-|---|---|---|---|---|
-| `PaddlePaddle/PP-DocLayoutV3_safetensors` (Standard) | PP-DocLayout V3 mit Instanz-Segmentierung (nativ in GLM-OCR) | Echte Polygone aus Segmentierungsmasken, variable Punktanzahl, konturgetreu | Beste Genauigkeit für nicht-planare Dokumente (schräg, gebogen, Handyfoto), viele Kategorien, Lesereihenfolge | Nur über GLM-OCR-Pipeline nutzbar |
-| `pascalrai/Deformable-DETR-Document-Layout-Analysis` | Deformable DETR (reine Objekterkennung, keine Segmentierung) | Nur achsenparallele Bounding-Boxen (4-Punkt-Rechtecke) | Trainiert auf DocLayNet (mAP 0.61), gute Tabellen-/Texterkennung | Benötigt `timm`; keine echten Polygone möglich (architekturbedingt) |
-| `Aryn/deformable-detr-DocLayNet` | Deformable DETR (reine Objekterkennung) | Nur achsenparallele Bounding-Boxen | Trainiert auf DocLayNet, alternative Gewichtung | Benötigt `timm`; keine echten Polygone möglich |
-| `docling-project/docling-layout-heron` | RT-DETRv2 (reine Objekterkennung) | Nur achsenparallele Bounding-Boxen | Schnelle Inferenz | Erkennt gescannte Seiten oft als einzelne „Picture"-Region; keine echten Polygone möglich |
-| `docling-project/docling-layout-heron-101` | RT-DETRv2 (reine Objekterkennung) | Nur achsenparallele Bounding-Boxen | Größere Variante von Heron | Gleiche Einschränkungen wie Heron |
-
-Hinweis: Für erkannte Tabellenregionen wird automatisch eine Zellstruktur-Erkennung via Microsoft Table Transformer (`table-transformer-structure-recognition-v1.1-all`) durchgeführt. Die erkannten Zellen (Zeilen × Spalten, Header, Spanning Cells) werden als `cells`-Array in der jeweiligen Layout-Region zurückgegeben.
-
-Response-Format:
+Beispiel-Antwort:
 
 ```json
 {
@@ -203,13 +250,17 @@ Response-Format:
   "layout": [
     {
       "page_number": 1,
+      "page_deskew_correction_ccw": 90.0,
       "regions": [
         {
           "index": 0,
           "label": "text_block",
           "content": "...",
           "bbox_2d": [100.0, 120.0, 900.0, 260.0],
-          "confidence": 0.96
+          "confidence": 0.96,
+          "angle": 0.0,
+          "preview_angle": 0.0,
+          "deskew_correction_ccw": 0.0
         }
       ]
     }
@@ -276,37 +327,25 @@ pro Runner liefert Durchschnitt + Standardabweichung.
 
 ### Wie es intern funktioniert
 
-- **In-Memory-Store** (`BenchmarkJobStore` in `app/services/benchmark.py`):
-  Ein einzelnes Python-Dict im FastAPI-Prozess hält alle Jobs. `asyncio.Lock`
-  serialisiert Mutationen; bei Prozess-Neustart sind die Jobs weg. Pro Replica
-  unabhängig — nicht für horizontales Scaling ausgelegt.
-- **Worker** (`run_benchmark_job`): wird als `asyncio.create_task(...)` im
-  POST-Handler gefeuert, läuft im Hintergrund und mutiert `job.rows` direkt.
-  Der POST kommt sofort mit `{job_id}` zurück, der Worker arbeitet weiter.
-- **Sequentiell, kein Parallelismus**: alle (Datei × Runner)-Paare werden
-  nacheinander abgearbeitet. Grund: Ollama lädt Modelle exklusiv, parallele
-  Calls thrashen den Speicher und verfälschen die Latenz-Messung. Externe
-  Engines könnten parallel laufen — bisher nicht implementiert,
-  weil Latenz-Vergleichbarkeit wichtiger ist als Wall-Clock-Zeit.
-- **Tracking**: jede Zeile (`BenchmarkRow`) bekommt Status `pending → running
-  → done/error`, plus Metriken sobald der Runner zurückkommt. Das Frontend
-  pollt `GET /api/benchmark/{id}` alle 2 s — das Polling ist eine
-  Browser-Convenience, der Backend pusht nichts. Bei MLflow wird zusätzlich
-  ein verschachtelter Run pro Zeile geschrieben (siehe unten).
-- **Persistenz**: drei Schichten, jede opt-in.
-  - In-Memory: bis zum nächsten Restart.
-  - CSV: `GET /api/benchmark/{id}/csv` als Anhang herunterladen.
-  - MLflow: bei gesetztem `MLFLOW_TRACKING_URI` zusätzliches Logging mit
-    Artefakten und Parent/Child-Run-Hierarchie.
+Benchmark-Jobs liegen in einem **prozesslokalen** `BenchmarkJobStore` (`app/services/benchmark.py`): `asyncio.Lock` + In-Memory-`dict`. Nicht über Replikas geteilt; nach Neustart weg, sofern Sie nicht CSV/MLflow exportiert haben.
+
+- **Worker:** `POST /api/benchmark` liefert sofort `{job_id}`; `run_benchmark_job` läuft als `asyncio.create_task` und aktualisiert `job.rows` direkt.
+- **Sequentiell:** (Datei × Runner)-Paare nacheinander, damit Ollama-Latenzen vergleichbar bleiben (kein paralleles lokales Inference).
+- **Fortschritt:** Poll `GET /api/benchmark/{job_id}` (UI ~2 s). Zeilen: `pending → running → done|error`. Optional `POST /api/benchmark/{job_id}/cancel` setzt `cancelled`.
+- **Aufbewahrung:** nach Abschluss (oder Abbruch) wird der Job nach `BENCHMARK_JOB_TTL_S` (Standard 3600) automatisch entfernt. `DELETE /api/benchmark/{job_id}` entfernt sofort.
+- **Export:** `GET /api/benchmark/{job_id}/csv`; optional MLflow Parent/Child-Runs bei `MLFLOW_TRACKING_URI` (siehe unten).
+
+Azure-kompatible `:analyze`-Jobs nutzen einen **separaten** Dateisystem-Store (`ANALYZE_STORE_DIR`), nicht das Benchmark-Dict.
 
 ### Job-Lifecycle
 
 ```
-POST   /api/benchmark              → { job_id }
-GET    /api/benchmark              → { jobs: [...] }
-GET    /api/benchmark/{job_id}     → vollständiger Job-State + Live-Progress
-GET    /api/benchmark/{job_id}/csv → CSV-Export
-DELETE /api/benchmark/{job_id}     → aus dem In-Memory-Store löschen
+POST   /api/benchmark                    → { job_id }
+GET    /api/benchmark                    → { jobs: [...] }
+GET    /api/benchmark/{job_id}           → Job-Status + Fortschritt
+POST   /api/benchmark/{job_id}/cancel    → laufenden Job abbrechen
+GET    /api/benchmark/{job_id}/csv       → CSV-Export
+DELETE /api/benchmark/{job_id}           → Job sofort löschen
 ```
 
 Hard-Caps konfigurierbar via `BENCHMARK_MAX_FILES` (Standard 50) und
@@ -472,7 +511,7 @@ Der Layout-Viewer kann wortgenaue Bounding-Polygone anzeigen. Dafür wird `OCR_W
 | DocTR (Standard) | `doctr` | in den Haupt-Dependencies enthalten |
 | PaddleOCR | `paddleocr` | `pip install ".[paddle]"` bzw. Docker-Extra `paddle` |
 
-Im Docker-Image ist zusätzlich das `paddle`-Extra enthalten (`pip install ".[paddle]"`).
+Das Docker-Image installiert die Extras `paddle` und `osd` (`INSTALL_EXTRA=paddle,osd`) und enthält `tesseract-ocr` für OSD-Deskew.
 
 Hinweise:
 - PaddleOCR erfordert Python 3.12 (keine Wheels für 3.13).
@@ -488,6 +527,26 @@ docker compose up --build
 ```
 
 Öffnen: `http://127.0.0.1:8000`
+
+UI-Sprache standardmäßig Englisch (`APP_LOCALE=en`). Umschalten über **EN / DE** neben dem Theme oder `APP_LOCALE=de` in `.env`. Die Wahl wird in Cookie und `localStorage` gespeichert.
+
+Standard-Image nutzt **CPU**-PyTorch (`Dockerfile`). GPU-Layouts über offizielle Basis-Images (siehe [`docs/docker-pytorch.md`](docs/docker-pytorch.md)):
+
+```bash
+# NVIDIA — Dockerfile.cuda
+docker compose -f docker-compose.yml -f docker-compose.cuda.yml up --build
+
+# AMD — Dockerfile.rocm
+docker compose -f docker-compose.yml -f docker-compose.rocm.yml up --build
+```
+
+Vision-LLM auf der GPU typischerweise über **llama.cpp** ([`docs/llamacpp-docker-glm-ocr.md`](docs/llamacpp-docker-glm-ocr.md)), nicht PyTorch-Vulkan.
+
+Inference-Env-Variablen (`INFERENCE_PROVIDER`, `INFERENCE_BASE_URL`, `INFERENCE_MODEL`, …) stehen in `docker-compose.yml` und `.env`. Stack mit gebündeltem Setup:
+
+```bash
+docker compose -f docker-compose.stack.yml up --build
+```
 
 GPU-Hinweise:
 
@@ -527,8 +586,8 @@ docker compose down
 
 ## Lizenz
 
-Apache-2.0 — siehe [`LICENSE`](LICENSE).
+Apache License 2.0. Siehe [`LICENSE`](LICENSE).
 
 ## Autor
 
-HN-Tran — <https://github.com/HN-Tran>
+[HN-Tran](https://github.com/HN-Tran)
