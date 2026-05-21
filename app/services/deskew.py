@@ -652,7 +652,7 @@ def _quarter_turn_env_override() -> int | None:
 
 
 def _pick_cardinal_orientation(
-    img: Image.Image, *, min_angle_deg: float = 0.5
+    img: Image.Image, *, min_angle_deg: float = 0.5, deskew_context: str = "page"
 ) -> tuple[int, str]:
     """Choose the best 0/90/180/270° CCW correction for this page."""
     probe, probe_source, content_fill = _orientation_probe_image(img)
@@ -670,6 +670,7 @@ def _pick_cardinal_orientation(
         min_angle_deg=min_angle_deg,
         probe_source=probe_source,
         content_fill=content_fill,
+        deskew_context=deskew_context,
     )
 
 
@@ -679,11 +680,17 @@ def _pick_cardinal_on_probe(
     min_angle_deg: float,
     probe_source: str,
     content_fill: float,
+    deskew_context: str = "page",
 ) -> tuple[int, str]:
     """Cardinal orientation on a probe image (full page or content crop)."""
     skew_hint = detect_page_angle(probe)
     _deskew_debug("skew_hint", degrees=round(skew_hint, 2))
-    if min_angle_deg <= abs(skew_hint) < _NEAR_CARDINAL_SKEW_DEG:
+    skew_only_min = (
+        _SKEW_ONLY_CARDINAL_MIN_DEG
+        if deskew_context == "region"
+        else max(min_angle_deg, _SKEW_ONLY_CARDINAL_MIN_DEG)
+    )
+    if skew_only_min <= abs(skew_hint) < _NEAR_CARDINAL_SKEW_DEG:
         _deskew_debug("pick_result", branch="skew_only_no_cardinal", cardinal_ccw=0)
         return 0, "skew_only_no_cardinal"
 
@@ -775,6 +782,8 @@ _VERTICAL_AXIS_MARGIN = 0.5
 _NEAR_CARDINAL_SKEW_DEG = 85.0
 _SIDEWAYS_LOW_CONF = 0.25
 _SKEW_HINT_CARDINAL_TOL = 15.0
+# Only treat skew_hint as "no cardinal" in this band; tiny hints still run OSD/180 checks.
+_SKEW_ONLY_CARDINAL_MIN_DEG = 15.0
 
 _EXIF_ORIENTATION_CCW: dict[int, float] = {3: 180.0, 6: 270.0, 8: 90.0}
 
@@ -852,6 +861,13 @@ def normalize_ccw_angle(degrees: float) -> float:
     return normalized
 
 
+def round_deskew_correction_ccw(net_ccw: float) -> float:
+    """Normalized CCW correction for API fields (0 when none applied)."""
+    if net_ccw == 0.0:
+        return 0.0
+    return round(normalize_ccw_angle(net_ccw), 1)
+
+
 def detect_deskew_correction(
     img: Image.Image,
     *,
@@ -865,6 +881,83 @@ def detect_deskew_correction(
         cardinal_confidence_threshold=cardinal_confidence_threshold,
     )
     return net_ccw
+
+
+def _preview_cardinal_tilt(img: Image.Image) -> int:
+    """Quarter-turn wrong in the preview (0, 90, 180, or 270)."""
+    osd_ccw = _osd_cardinal_ccw(img)
+    if osd_ccw is not None:
+        return osd_ccw
+
+    card, conf = detect_cardinal_rotation(img)
+    if card != 0 and conf >= 0.05:
+        return card
+
+    gray = _to_gray(img)
+    vc0 = _text_vertical_center(gray)
+    vc2 = _text_vertical_center(np.rot90(gray, k=2))
+    if vc0 is not None and vc2 is not None and abs(vc0 - vc2) > 0.08:
+        return 180 if vc2 < vc0 else 0
+    return 0
+
+
+def detect_original_tilt(img: Image.Image, *, min_angle_deg: float = 0.5) -> float:
+    """Tilt of content on the original scan (0° = upright); cardinal + fine skew."""
+    cardinal = _preview_cardinal_tilt(img)
+    fine, _source = _measure_fine_skew_angle(img)
+    if abs(fine) >= _NEAR_CARDINAL_SKEW_DEG or abs(fine) > 20.0:
+        fine = 0.0
+
+    if cardinal != 0:
+        tilt = float(cardinal) + fine
+        if abs(tilt) >= min_angle_deg:
+            return round(tilt, 1)
+        return 0.0
+
+    if min_angle_deg <= abs(fine) < _NEAR_CARDINAL_SKEW_DEG:
+        return round(float(fine), 1)
+
+    coarse = detect_page_angle(img, max_scan_dim=_fine_skew_scan_dim_for(img))
+    if abs(coarse) >= min_angle_deg and abs(coarse) < _NEAR_CARDINAL_SKEW_DEG:
+        return round(float(coarse), 1)
+    return 0.0
+
+
+def detect_preview_tilt(img: Image.Image, *, min_angle_deg: float = 0.5) -> float:
+    """Alias for :func:`detect_original_tilt` (legacy name)."""
+    return detect_original_tilt(img, min_angle_deg=min_angle_deg)
+
+
+def preview_angle_from_corrections(
+    original_angle: float,
+    *,
+    page_correction_ccw: float = 0.0,
+) -> float:
+    """Tilt on the deskewed page preview: ``original_angle - page_correction_ccw``."""
+    if original_angle == 0.0 and page_correction_ccw == 0.0:
+        return 0.0
+    return round(
+        normalize_ccw_angle(float(original_angle) - float(page_correction_ccw)),
+        1,
+    )
+
+
+def reconcile_preview_tilt(
+    measured: float,
+    *,
+    correction_ccw: float = 0.0,
+    min_angle_deg: float = 0.5,
+) -> float:
+    """Merge measured preview tilt with a region deskew correction when cardinal detect fails."""
+    if correction_ccw != 0.0:
+        net = normalize_ccw_angle(correction_ccw)
+        if abs(net) >= 45.0:
+            return round(abs(net), 1)
+        if abs(measured) < min_angle_deg and abs(net) >= min_angle_deg:
+            return round(net, 1)
+    if abs(measured) < min_angle_deg:
+        return 0.0
+    return round(float(measured), 1)
 
 
 def detect_page_angle(img: Image.Image, *, max_scan_dim: int = 600) -> float:
@@ -989,7 +1082,7 @@ def deskew_image(
     try:
         if allow_page_cardinal:
             cardinal_ccw, cardinal_branch = _pick_cardinal_orientation(
-                img, min_angle_deg=min_angle_deg
+                img, min_angle_deg=min_angle_deg, deskew_context=deskew_context
             )
         else:
             cardinal_ccw = 0

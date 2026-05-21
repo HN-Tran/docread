@@ -74,6 +74,55 @@ def test_tesseract_osd_branch_skips_landscape_flip(monkeypatch) -> None:
     assert not any("landscape_flip_apply" in line for line in trace)
 
 
+def test_detect_original_tilt_on_upright_and_sideways_crop() -> None:
+    from app.services.deskew import _apply_ccw_transpose, detect_original_tilt
+
+    doc = Image.new("RGB", (700, 1000), "white")
+    draw = ImageDraw.Draw(doc)
+    for index, char in enumerate("INVOICE DOCUMENT"):
+        draw.text((40 + index * 20, 450), char, fill="black")
+    sideways = doc.transpose(Image.Transpose.ROTATE_270)
+    upright = _apply_ccw_transpose(sideways, 90)
+    assert detect_original_tilt(upright) == 0.0
+    assert abs(detect_original_tilt(sideways)) >= 85.0
+
+
+def test_preview_angle_from_corrections_subtracts_page_ccw() -> None:
+    from app.services.deskew import preview_angle_from_corrections
+
+    assert preview_angle_from_corrections(180.0, page_correction_ccw=0.0) == 180.0
+    assert preview_angle_from_corrections(0.0, page_correction_ccw=180.0) == 180.0
+    assert preview_angle_from_corrections(180.0, page_correction_ccw=180.0) == 0.0
+
+
+def test_round_deskew_correction_ccw_normalizes() -> None:
+    from app.services.deskew import round_deskew_correction_ccw
+
+    assert round_deskew_correction_ccw(0.0) == 0.0
+    assert round_deskew_correction_ccw(84.5) == 84.5
+    assert round_deskew_correction_ccw(270.0) == -90.0
+
+
+def test_reconcile_preview_tilt_uses_cardinal_correction() -> None:
+    from app.services.deskew import reconcile_preview_tilt
+
+    assert reconcile_preview_tilt(-0.5, correction_ccw=180.0) == 180.0
+    assert reconcile_preview_tilt(0.0, correction_ccw=-5.5) == -5.5
+    assert reconcile_preview_tilt(4.0, correction_ccw=0.0) == 4.0
+
+
+def test_detect_preview_tilt_upside_down_includes_cardinal_and_fine() -> None:
+    from app.services.deskew import detect_preview_tilt
+
+    doc = Image.new("RGB", (700, 1000), "white")
+    draw = ImageDraw.Draw(doc)
+    for index, char in enumerate("INVOICE DOCUMENT"):
+        draw.text((40 + index * 20, 450), char, fill="black")
+    upside_down = doc.transpose(Image.Transpose.ROTATE_180)
+    tilt = detect_preview_tilt(upside_down)
+    assert abs(tilt) >= 175.0, tilt
+
+
 def test_region_deskew_skips_landscape_flip_on_fine_skew_only(monkeypatch) -> None:
     """Region crops after page deskew: fine skew must not trigger +180° landscape flip."""
     monkeypatch.setenv("DESKEW_DEBUG", "1")

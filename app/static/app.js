@@ -597,13 +597,12 @@ function formatConfidence(value) {
   return numericValue.toFixed(2);
 }
 
-function formatRegionAngle(region) {
-  const raw = region?.region_angle;
-  const numericValue = Number(raw);
+function formatLayoutAngle(degrees) {
+  const numericValue = Number(degrees);
   if (!Number.isFinite(numericValue) || Math.abs(numericValue) < 0.05) {
     return null;
   }
-  return `${numericValue.toFixed(1)}° CCW`;
+  return `${numericValue.toFixed(1)}°`;
 }
 
 function getRegionConfidence(region) {
@@ -1312,12 +1311,35 @@ function renderLayoutPanel(layoutPages, visualizations, activePageIndex = null) 
         regionHeadEl.appendChild(confidenceEl);
       }
 
-      const angleLabel = formatRegionAngle(region);
+      const angleLabel = formatLayoutAngle(region.angle);
       if (angleLabel) {
         const angleEl = document.createElement("span");
-        angleEl.className = "layout-region-angle";
-        angleEl.textContent = angleLabel;
+        angleEl.className = "layout-region-angle layout-region-angle-original";
+        angleEl.textContent = tr("layout_region_angle_original", { angle: angleLabel });
+        angleEl.title = tr("layout_region_angle_title");
         regionHeadEl.appendChild(angleEl);
+      }
+
+      const previewAngleLabel = formatLayoutAngle(region.preview_angle);
+      if (previewAngleLabel) {
+        const previewAngleEl = document.createElement("span");
+        previewAngleEl.className = "layout-region-angle layout-region-angle-preview";
+        previewAngleEl.textContent = tr("layout_region_angle_preview", {
+          angle: previewAngleLabel,
+        });
+        previewAngleEl.title = tr("layout_region_preview_angle_title");
+        regionHeadEl.appendChild(previewAngleEl);
+      }
+
+      const correctionAngleLabel = formatLayoutAngle(region.deskew_correction_ccw);
+      if (correctionAngleLabel) {
+        const correctionAngleEl = document.createElement("span");
+        correctionAngleEl.className = "layout-region-angle layout-region-angle-correction";
+        correctionAngleEl.textContent = tr("layout_region_deskew_correction", {
+          angle: correctionAngleLabel,
+        });
+        correctionAngleEl.title = tr("layout_region_deskew_correction_title");
+        regionHeadEl.appendChild(correctionAngleEl);
       }
 
       const metaEl = document.createElement("span");
