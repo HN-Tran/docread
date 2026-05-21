@@ -1948,7 +1948,7 @@ function applyOcrResponse(data, { requestMode, requestTask, backendFallback }) {
   lastOcrApplyContext = { requestMode, requestTask, backendFallback };
   setAdvancedDirty(false);
   let displayText = data.text || tr("no_content");
-  const markdownPreview = typeof data.markdown === "string" ? data.markdown : "";
+  const markdownField = typeof data.markdown === "string" ? data.markdown : "";
   let tableMatrices = [];
 
   if (requestMode === "plain" && requestTask === "extract_table_markdown") {
@@ -1991,7 +1991,8 @@ function applyOcrResponse(data, { requestMode, requestTask, backendFallback }) {
     if (diffGroupsEl) diffGroupsEl.classList.add("hidden");
     diffEmptyEl?.classList.remove("hidden");
     clearDiffPanel();
-    renderMarkdownPreview(markdownPreview);
+    const previewSource = markdownField.trim() ? markdownField : displayText;
+    renderMarkdownPreview(previewSource);
     renderTablePreview(tableMatrices);
     const layoutPages = normalizeLayoutPages(data.layout);
 
@@ -2016,7 +2017,7 @@ function applyOcrResponse(data, { requestMode, requestTask, backendFallback }) {
       hasLayout:
         layoutPages.length > 0 ||
         (Array.isArray(data.layout_visualizations) && data.layout_visualizations.length > 0),
-      hasMarkdown: markdownPreview.trim().length > 0,
+      hasMarkdown: previewSource.trim().length > 0,
       hasMetrics: !!lastMetrics,
     });
     lastTableMatrices = tableMatrices;
