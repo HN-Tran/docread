@@ -318,8 +318,8 @@ def _pick_sideways_ccw(
     """Choose 90° or 270° CCW for a sideways page."""
     trials: list[dict[str, float | int]] = []
     for rot in (90, 270):
-        trial = _apply_ccw_transpose(img, rot)
-        card, conf = detect_cardinal_rotation(trial)
+        rotated_img = _apply_ccw_transpose(img, rot)
+        card, conf = detect_cardinal_rotation(rotated_img)
         if card == 0:
             card_rank = 0
         elif card == 180:
@@ -332,7 +332,7 @@ def _pick_sideways_ccw(
                 "card": card,
                 "conf": conf,
                 "card_rank": card_rank,
-                "residual": abs(detect_page_angle(trial)),
+                "residual": abs(detect_page_angle(rotated_img)),
             }
         )
 
@@ -363,24 +363,20 @@ def _pick_sideways_ccw(
         and (allow_skew_hint_tie or full_page_ambiguous_skew_hint)
     ):
         chosen = hint_ccw
-        reason = (
-            "skew_hint_ambiguous"
-            if allow_skew_hint_tie
-            else "skew_hint_full_page_ambiguous"
-        )
+        reason = "skew_hint_ambiguous" if allow_skew_hint_tie else "skew_hint_full_page_ambiguous"
     elif ambiguous and allow_skew_hint_tie and hint_ccw is not None:
         chosen = hint_ccw
         reason = "skew_hint_ambiguous"
 
     if _deskew_debug_enabled():
-        for trial in trials:
+        for entry in trials:
             _deskew_debug(
                 "sideways_trial",
-                trial_ccw=int(trial["rot"]),
-                detect_card=int(trial["card"]),
-                detect_conf=round(float(trial["conf"]), 4),
-                residual_skew=round(float(trial["residual"]), 2),
-                card_rank=int(trial["card_rank"]),
+                trial_ccw=int(entry["rot"]),
+                detect_card=int(entry["card"]),
+                detect_conf=round(float(entry["conf"]), 4),
+                residual_skew=round(float(entry["residual"]), 2),
+                card_rank=int(entry["card_rank"]),
             )
         _deskew_debug(
             "sideways_pick",
@@ -472,9 +468,7 @@ def _measure_fine_skew_angle(img: Image.Image) -> tuple[float, str]:
     return _pick_fine_skew_from_candidates(candidates, default_source=probe_source)
 
 
-def _apply_fine_skew(
-    img: Image.Image, *, min_angle_deg: float
-) -> tuple[Image.Image, float]:
+def _apply_fine_skew(img: Image.Image, *, min_angle_deg: float) -> tuple[Image.Image, float]:
     """Apply small skew correction when the page is not near a quarter-turn."""
     angle, probe_source = _measure_fine_skew_angle(img)
     net_ccw = 0.0
@@ -730,9 +724,7 @@ def _pick_cardinal_on_probe(
             probe,
             skew_hint=skew_hint,
             allow_skew_hint_tie=probe_source == "content_bbox",
-            full_page_ambiguous_skew_hint=(
-                probe_source == "full_page" and content_fill >= 0.95
-            ),
+            full_page_ambiguous_skew_hint=(probe_source == "full_page" and content_fill >= 0.95),
         )
         _deskew_debug("pick_result", branch="sideways", cardinal_ccw=picked)
         return picked, "sideways"
@@ -843,7 +835,9 @@ def _variance_beats(current: float, best: float) -> bool:
     return current > best + _VARIANCE_TIE_ABS
 
 
-def _prefer_skew_angle(candidate: float, best: float, *, candidate_var: float, best_var: float) -> bool:
+def _prefer_skew_angle(
+    candidate: float, best: float, *, candidate_var: float, best_var: float
+) -> bool:
     if _variance_beats(candidate_var, best_var):
         return True
     if abs(candidate_var - best_var) > _VARIANCE_TIE_ABS:
@@ -980,14 +974,17 @@ def detect_page_angle(img: Image.Image, *, max_scan_dim: int = 600) -> float:
         )
         return float(np.var(arr.sum(axis=1).astype(np.float64)))
 
+    best_angle = 0.0
+    best_var = _var(0.0)
+
     def _update_best(candidate: float, candidate_var: float) -> None:
         nonlocal best_angle, best_var
-        if _prefer_skew_angle(candidate, best_angle, candidate_var=candidate_var, best_var=best_var):
+        if _prefer_skew_angle(
+            candidate, best_angle, candidate_var=candidate_var, best_var=best_var
+        ):
             best_var = candidate_var
             best_angle = candidate
 
-    best_angle = 0.0
-    best_var = _var(0.0)
     for coarse_deg in range(-90, 91, 5):
         if coarse_deg == 0:
             continue

@@ -657,9 +657,7 @@ class DocumentPipeline:
             original_crop = self._crop_region_image(
                 angle_source, region.get("bbox_2d", [0, 0, 0, 0])
             )
-            region_crop_img = self._crop_region_image(
-                image, region.get("bbox_2d", [0, 0, 0, 0])
-            )
+            region_crop_img = self._crop_region_image(image, region.get("bbox_2d", [0, 0, 0, 0]))
             original_tilt = 0.0
             region_deskew_net = 0.0
             if original_crop is not None:
@@ -984,9 +982,7 @@ class DocumentPipeline:
                         shown = normalize_ccw_angle(deskew_ccw)
                         deskew_msg = f"Deskew: {shown:.1f}° CCW Korrektur angewendet"
                         warnings.append(
-                            f"Seite {page_number}: {deskew_msg}"
-                            if len(pages) > 1
-                            else deskew_msg
+                            f"Seite {page_number}: {deskew_msg}" if len(pages) > 1 else deskew_msg
                         )
                     for line in consume_deskew_debug_trace():
                         prefix = f"Seite {page_number}: " if len(pages) > 1 else ""

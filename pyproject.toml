@@ -92,5 +92,7 @@ module = [
     "paddlex.*",
     "mlflow",
     "mlflow.*",
+    "pytesseract",
+    "pytesseract.*",
 ]
 ignore_missing_imports = true

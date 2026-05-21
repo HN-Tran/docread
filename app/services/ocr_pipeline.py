@@ -20,8 +20,8 @@ from app.services.deskew import (
     deskew_image,
     detect_preview_tilt,
     normalize_ccw_angle,
-    round_deskew_correction_ccw,
     open_rgb_image,
+    round_deskew_correction_ccw,
 )
 from app.services.inference import InferenceError
 from app.services.inference.protocol import VisionLlmClient
@@ -369,9 +369,7 @@ class OCRPipeline:
                             f"PDF-Seite {page_index + 1}: /Rotate {rotation_cw}° CW auf Raster angewendet"
                         )
                         for line in consume_deskew_debug_trace():
-                            warnings.append(
-                                f"PDF-Seite {page_index + 1}: Deskew debug: {line}"
-                            )
+                            warnings.append(f"PDF-Seite {page_index + 1}: Deskew debug: {line}")
                     output = BytesIO()
                     image.save(output, format="PNG", optimize=True)
                     rendered_pages.append(output.getvalue())
