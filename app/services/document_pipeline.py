@@ -22,8 +22,11 @@ from rapidfuzz import fuzz
 from app.services.deskew import (
     consume_deskew_debug_trace,
     deskew_image,
+    detect_original_tilt,
     normalize_ccw_angle,
     open_rgb_image,
+    preview_angle_from_corrections,
+    round_deskew_correction_ccw,
 )
 from app.services.inference import InferenceError
 from app.services.inference.protocol import VisionLlmClient
@@ -590,6 +593,8 @@ class DocumentPipeline:
         model: str,
         detector: HFLayoutDetector,
         page_number: int,
+        original_page_image: Image.Image | None = None,
+        page_deskew_correction_ccw: float = 0.0,
         use_table_transformer: bool = False,
         per_region_ocr: bool = True,
         text_anchor: bool = True,
@@ -644,8 +649,23 @@ class DocumentPipeline:
                 "bbox_2d": region.get("bbox_2d"),
                 "polygon": region.get("polygon"),
                 "confidence": region.get("score"),
-                "region_angle": 0,
+                "angle": 0.0,
+                "deskew_correction_ccw": 0.0,
             }
+
+            angle_source = original_page_image if original_page_image is not None else image
+            original_crop = self._crop_region_image(
+                angle_source, region.get("bbox_2d", [0, 0, 0, 0])
+            )
+            region_crop_img = self._crop_region_image(
+                image, region.get("bbox_2d", [0, 0, 0, 0])
+            )
+            original_tilt = 0.0
+            region_deskew_net = 0.0
+            if original_crop is not None:
+                original_tilt = detect_original_tilt(
+                    original_crop, min_angle_deg=self.deskew_min_angle_deg
+                )
 
             if task_type == "skip":
                 layout_region["content"] = ""
@@ -653,42 +673,33 @@ class DocumentPipeline:
                 layout_region["content"] = ""
             else:
                 precomputed_crop: bytes | None = None
-                region_crop_img: Image.Image | None = None
                 region_area_frac = self._region_page_area_fraction(
                     image, cast(list[float], region.get("bbox_2d", [0, 0, 0, 0]))
                 )
-                if self.deskew_enabled and region_area_frac < _REGION_PAGE_AREA_SKIP:
-                    region_crop_img = self._crop_region_image(
-                        image, region.get("bbox_2d", [0, 0, 0, 0])
-                    )
-                    if region_crop_img is not None:
-                        try:
-                            corrected_crop, region_net = await asyncio.to_thread(
-                                deskew_image,
-                                region_crop_img,
-                                min_angle_deg=self.deskew_min_angle_deg,
-                                allow_page_cardinal=True,
-                                deskew_context="region",
-                                debug_label=f"region {idx}",
-                            )
-                            region_crop_img = corrected_crop
-                            if region_net != 0.0:
-                                buf = io.BytesIO()
-                                corrected_crop.save(buf, format="PNG")
-                                precomputed_crop = buf.getvalue()
-                                shown = normalize_ccw_angle(region_net)
-                                layout_region["region_angle"] = round(shown, 1)
-                                if abs(region_net) >= self.deskew_min_angle_deg:
-                                    warnings.append(
-                                        f"Region {idx} ({label}): {shown:.1f}° CCW "
-                                        "Korrektur erkannt"
-                                    )
-                            for line in consume_deskew_debug_trace():
-                                warnings.append(f"Region {idx} deskew debug: {line}")
-                        except Exception as exc:  # noqa: BLE001
-                            warnings.append(
-                                f"Region {idx} Deskew fehlgeschlagen: {exc}"
-                            )
+                if (
+                    self.deskew_enabled
+                    and region_area_frac < _REGION_PAGE_AREA_SKIP
+                    and region_crop_img is not None
+                ):
+                    try:
+                        corrected_crop, region_net = await asyncio.to_thread(
+                            deskew_image,
+                            region_crop_img.copy(),
+                            min_angle_deg=self.deskew_min_angle_deg,
+                            allow_page_cardinal=True,
+                            deskew_context="region",
+                            debug_label=f"region {idx}",
+                        )
+                        region_crop_img = corrected_crop
+                        region_deskew_net = region_net
+                        if region_net != 0.0:
+                            buf = io.BytesIO()
+                            corrected_crop.save(buf, format="PNG")
+                            precomputed_crop = buf.getvalue()
+                        for line in consume_deskew_debug_trace():
+                            warnings.append(f"Region {idx} deskew debug: {line}")
+                    except Exception as exc:  # noqa: BLE001
+                        warnings.append(f"Region {idx} Deskew fehlgeschlagen: {exc}")
 
                 try:
                     candidate = await self._ocr_region(
@@ -724,10 +735,21 @@ class DocumentPipeline:
                         except Exception as exc:  # noqa: BLE001
                             warnings.append(f"Region {idx} Table Transformer fehlgeschlagen: {exc}")
 
+            if original_crop is not None:
+                layout_region["angle"] = original_tilt
+                layout_region["preview_angle"] = preview_angle_from_corrections(
+                    original_tilt,
+                    page_correction_ccw=page_deskew_correction_ccw,
+                )
+                layout_region["deskew_correction_ccw"] = round_deskew_correction_ccw(
+                    region_deskew_net
+                )
+
             layout_regions.append(layout_region)
 
         page_layout: dict[str, object] = {
             "page_number": page_number,
+            "page_deskew_correction_ccw": page_deskew_correction_ccw,
             "regions": layout_regions,
         }
 
@@ -946,7 +968,8 @@ class DocumentPipeline:
             page_number = page_idx + 1
 
             # Page-level deskew from pixel content (scans have no reliable EXIF).
-            page_angle = 0.0
+            original_page_image = page_image.copy()
+            page_deskew_correction_ccw = 0.0
             if self.deskew_enabled:
                 try:
                     page_image, deskew_ccw = await asyncio.to_thread(
@@ -956,7 +979,7 @@ class DocumentPipeline:
                         debug_label=f"page {page_number}",
                         allow_page_cardinal=self.deskew_page_cardinal,
                     )
-                    page_angle = normalize_ccw_angle(deskew_ccw)
+                    page_deskew_correction_ccw = round_deskew_correction_ccw(deskew_ccw)
                     if deskew_ccw != 0.0:
                         shown = normalize_ccw_angle(deskew_ccw)
                         deskew_msg = f"Deskew: {shown:.1f}° CCW Korrektur angewendet"
@@ -983,6 +1006,8 @@ class DocumentPipeline:
                 model=selected_model,
                 detector=detector,
                 page_number=page_number,
+                original_page_image=original_page_image,
+                page_deskew_correction_ccw=page_deskew_correction_ccw,
                 use_table_transformer=selected_table_transformer,
                 per_region_ocr=selected_per_region_ocr,
                 assemble_from_regions=selected_assemble_from_regions,
@@ -1011,7 +1036,7 @@ class DocumentPipeline:
             page_infos.append(
                 {
                     "page_number": page_number,
-                    "angle": round(page_angle, 1),
+                    "angle": page_deskew_correction_ccw,
                     "width": page_image.width,
                     "height": page_image.height,
                     "unit": "pixel",

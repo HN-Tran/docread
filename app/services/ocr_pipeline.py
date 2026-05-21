@@ -18,7 +18,9 @@ from app.services.deskew import (
     apply_pdf_page_rotation,
     consume_deskew_debug_trace,
     deskew_image,
+    detect_preview_tilt,
     normalize_ccw_angle,
+    round_deskew_correction_ccw,
     open_rgb_image,
 )
 from app.services.inference import InferenceError
@@ -261,7 +263,11 @@ class OCRPipeline:
 
     @staticmethod
     def _build_page_info(
-        *, page_number: int, width: int, height: int, angle: float = 0.0
+        *,
+        page_number: int,
+        width: int,
+        height: int,
+        angle: float = 0.0,
     ) -> dict[str, object]:
         return {
             "page_number": page_number,
@@ -283,14 +289,14 @@ class OCRPipeline:
             original_mode = opened.mode
             image = _flatten_to_rgb(open_rgb_image(image_bytes))
 
-            detected_angle = 0.0
+            page_angle = 0.0
             if self.deskew_enabled:
                 image, deskew_ccw = deskew_image(
                     image,
                     min_angle_deg=self.deskew_min_angle_deg,
                     debug_label=f"page {page_number}",
                 )
-                detected_angle = normalize_ccw_angle(deskew_ccw)
+                page_angle = round_deskew_correction_ccw(deskew_ccw)
                 if deskew_ccw != 0.0:
                     shown = normalize_ccw_angle(deskew_ccw)
                     warnings.append(f"Deskew: {shown:.1f}° CCW Korrektur angewendet")
@@ -325,7 +331,12 @@ class OCRPipeline:
                     page_number=page_number,
                     width=image.width,
                     height=image.height,
-                    angle=round(detected_angle, 1),
+                    angle=round(
+                        page_angle
+                        if self.deskew_enabled
+                        else detect_preview_tilt(image, min_angle_deg=self.deskew_min_angle_deg),
+                        1,
+                    ),
                 ),
             )
 
