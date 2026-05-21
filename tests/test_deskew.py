@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from io import BytesIO
 
+import pytest
 from PIL import Image, ImageDraw
 
 from app.services.deskew import (
@@ -51,7 +52,7 @@ def test_deskew_without_page_cardinal_skips_quarter_turn() -> None:
     assert net == 0.0, net
 
 
-def test_tesseract_osd_branch_skips_landscape_flip(monkeypatch) -> None:
+def test_tesseract_osd_branch_skips_landscape_flip(monkeypatch: pytest.MonkeyPatch) -> None:
     """OSD quarter-turn must not get an extra 180° from low-confidence landscape flip."""
     monkeypatch.setenv("DESKEW_DEBUG", "1")
     monkeypatch.setattr(
@@ -123,7 +124,9 @@ def test_detect_preview_tilt_upside_down_includes_cardinal_and_fine() -> None:
     assert abs(tilt) >= 175.0, tilt
 
 
-def test_region_deskew_skips_landscape_flip_on_fine_skew_only(monkeypatch) -> None:
+def test_region_deskew_skips_landscape_flip_on_fine_skew_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Region crops after page deskew: fine skew must not trigger +180° landscape flip."""
     monkeypatch.setenv("DESKEW_DEBUG", "1")
     monkeypatch.setattr(
@@ -143,7 +146,9 @@ def test_region_deskew_skips_landscape_flip_on_fine_skew_only(monkeypatch) -> No
     assert not any("landscape_flip_apply" in line for line in trace)
 
 
-def test_page_deskew_applies_fine_skew_after_osd_quarter_turn(monkeypatch) -> None:
+def test_page_deskew_applies_fine_skew_after_osd_quarter_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """After OSD 90°, residual scanner tilt (~5°) should appear in net_ccw."""
     monkeypatch.setattr(
         "app.services.deskew._osd_cardinal_ccw",
@@ -247,7 +252,7 @@ def test_deskew_image_applies_upside_down_correction() -> None:
     assert net == 180.0
 
 
-def test_deskew_debug_does_not_change_correction(monkeypatch) -> None:
+def test_deskew_debug_does_not_change_correction(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DESKEW_DEBUG", "1")
     base = _text_image()
     sideways = base.transpose(Image.Transpose.ROTATE_270)
@@ -257,7 +262,7 @@ def test_deskew_debug_does_not_change_correction(monkeypatch) -> None:
     assert net_off == net_on
 
 
-def test_deskew_debug_collects_trace_lines(monkeypatch) -> None:
+def test_deskew_debug_collects_trace_lines(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DESKEW_DEBUG", "1")
     base = _text_image()
     deskew_image(base.transpose(Image.Transpose.ROTATE_270), debug_label="page 1")
