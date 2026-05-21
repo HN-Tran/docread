@@ -25,9 +25,9 @@ def _filter_specs(specs: list[str]) -> list[str]:
 def main() -> None:
     data = tomllib.loads((APP_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     deps = _filter_specs(list(data["project"]["dependencies"]))
-    extra = os.environ.get("INSTALL_EXTRA", "").strip()
-    if extra:
-        deps.extend(_filter_specs(list(data["project"]["optional-dependencies"].get(extra, []))))
+    optional = data["project"]["optional-dependencies"]
+    for name in (n.strip() for n in os.environ.get("INSTALL_EXTRA", "").split(",") if n.strip()):
+        deps.extend(_filter_specs(list(optional.get(name, []))))
 
     subprocess.check_call(
         [

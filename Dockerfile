@@ -15,6 +15,7 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git libgl1 libglib2.0-0 libgomp1 libreoffice-writer \
+    tesseract-ocr tesseract-ocr-osd \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md ./
@@ -31,7 +32,7 @@ RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
       --index-url https://download.pytorch.org/whl/cpu \
       --extra-index-url https://pypi.org/simple \
       torch torchvision
-ENV INSTALL_EXTRA=paddle
+ENV INSTALL_EXTRA=paddle,osd
 RUN python3 /tmp/docker_install_app_deps.py
 
 RUN useradd -r -u 101 -m appuser && \

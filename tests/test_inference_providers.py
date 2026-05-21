@@ -55,6 +55,7 @@ def _base_settings(**overrides: object) -> Settings:
         "max_image_dim": 2048,
         "verify_ssl": False,
         "deskew_enabled": False,
+        "deskew_page_cardinal": False,
         "deskew_min_angle_deg": 0.5,
         "host": "127.0.0.1",
         "port": 8000,

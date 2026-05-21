@@ -14,7 +14,13 @@ import pypdfium2 as pdfium
 from PIL import Image
 
 from app.schemas import SCHEMA_REGISTRY
-from app.services.deskew import apply_exif_orientation, deskew_image
+from app.services.deskew import (
+    apply_pdf_page_rotation,
+    consume_deskew_debug_trace,
+    deskew_image,
+    normalize_ccw_angle,
+    open_rgb_image,
+)
 from app.services.inference import InferenceError
 from app.services.inference.protocol import VisionLlmClient
 from app.services.inference.registry import VisionClientRegistry
@@ -274,17 +280,22 @@ class OCRPipeline:
     ) -> tuple[bytes, list[str], dict[str, object]]:
         warnings: list[str] = []
         with Image.open(BytesIO(image_bytes)) as opened:
-            rotated, exif_ccw = apply_exif_orientation(opened)
-            original_mode = rotated.mode
-            image = _flatten_to_rgb(rotated)
+            original_mode = opened.mode
+            image = _flatten_to_rgb(open_rgb_image(image_bytes))
 
-            detected_angle = exif_ccw
-            if exif_ccw != 0.0:
-                warnings.append(f"EXIF-Orientierung: {exif_ccw:.0f}° CCW angewendet")
-            image, deskew_ccw = deskew_image(image, min_angle_deg=self.deskew_min_angle_deg)
-            detected_angle += deskew_ccw
-            if deskew_ccw != 0.0:
-                warnings.append(f"Deskew: {deskew_ccw:.1f}° CCW Korrektur angewendet")
+            detected_angle = 0.0
+            if self.deskew_enabled:
+                image, deskew_ccw = deskew_image(
+                    image,
+                    min_angle_deg=self.deskew_min_angle_deg,
+                    debug_label=f"page {page_number}",
+                )
+                detected_angle = normalize_ccw_angle(deskew_ccw)
+                if deskew_ccw != 0.0:
+                    shown = normalize_ccw_angle(deskew_ccw)
+                    warnings.append(f"Deskew: {shown:.1f}° CCW Korrektur angewendet")
+                for line in consume_deskew_debug_trace():
+                    warnings.append(f"Deskew debug: {line}")
 
             # Schritt 1: bitonale/Grauwert-Eingaben hochskalieren, BEVOR wir
             # an die max_image_dim-Grenze kommen — sonst geht der Vorteil
@@ -334,8 +345,22 @@ class OCRPipeline:
                 bitmap = None
                 try:
                     page = document[page_index]
+                    rotation_cw = int(page.get_rotation() or 0)
                     bitmap = page.render(scale=PDF_RENDER_SCALE)
-                    image = bitmap.to_pil()
+                    image = bitmap.to_pil().convert("RGB")
+                    if rotation_cw:
+                        image, _ = apply_pdf_page_rotation(
+                            image,
+                            rotation_cw,
+                            debug_label=f"pdf page {page_index + 1}",
+                        )
+                        warnings.append(
+                            f"PDF-Seite {page_index + 1}: /Rotate {rotation_cw}° CW auf Raster angewendet"
+                        )
+                        for line in consume_deskew_debug_trace():
+                            warnings.append(
+                                f"PDF-Seite {page_index + 1}: Deskew debug: {line}"
+                            )
                     output = BytesIO()
                     image.save(output, format="PNG", optimize=True)
                     rendered_pages.append(output.getvalue())
@@ -676,18 +701,15 @@ class OCRPipeline:
     def _prepare_images(
         self, *, image_bytes: bytes, content_type: str | None, gif_max_frames: int
     ) -> tuple[list[bytes], list[str], list[dict[str, object]], list[bytes] | None]:
-        """Return (prepared_images, warnings, page_infos, raw_page_images).
+        """Return (prepared_images, warnings, page_infos, preview_page_images).
 
-        ``raw_page_images`` is set for PDFs and TIFFs — file types the browser
-        cannot preview natively — and ``None`` otherwise.
+        ``preview_page_images`` holds deskewed PNG bytes for the UI preview so
+        layout overlays and plain/direct OCR use the same coordinate frame.
         """
-        _tiff_types = {"image/tif", "image/tiff", "image/x-tiff"}
         warnings: list[str] = []
-        raw_page_images: list[bytes] | None = None
         if content_type == "application/pdf":
             source_images, pdf_warnings = self._render_pdf_pages(image_bytes)
             warnings.extend(pdf_warnings)
-            raw_page_images = list(source_images)
         elif content_type == "image/gif":
             source_images, gif_warnings = self._render_gif_frames(
                 image_bytes, max_frames=gif_max_frames
@@ -710,11 +732,7 @@ class OCRPipeline:
                 self._with_page_prefix(warning, idx, total_pages) for warning in preprocess_warnings
             )
 
-        # Generate preview images for formats the browser cannot display.
-        if raw_page_images is None and content_type in _tiff_types:
-            raw_page_images = list(prepared_images)
-
-        return prepared_images, warnings, page_infos, raw_page_images
+        return prepared_images, warnings, page_infos, list(prepared_images)
 
     async def _run_plain_on_image(
         self,

@@ -140,6 +140,7 @@ class Settings:
     max_image_dim: int
     verify_ssl: bool
     deskew_enabled: bool
+    deskew_page_cardinal: bool
     deskew_min_angle_deg: float
     host: str
     port: int
@@ -237,6 +238,7 @@ def get_settings() -> Settings:
         default_token_limit=default_token_limit,
         verify_ssl=_env_bool("VERIFY_SSL", False),
         deskew_enabled=_env_bool("DESKEW_ENABLED", True),
+        deskew_page_cardinal=_env_bool("DESKEW_PAGE_CARDINAL", True),
         deskew_min_angle_deg=max(0.0, _env_float("DESKEW_MIN_ANGLE_DEG", 0.5)),
         request_timeout_s=_env_float("REQUEST_TIMEOUT_S", 120.0),
         max_upload_bytes=_env_int("MAX_UPLOAD_BYTES", 8 * 1024 * 1024),

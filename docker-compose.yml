@@ -33,6 +33,7 @@ services:
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-8388608}
       MAX_IMAGE_DIM: ${MAX_IMAGE_DIM:-2048}
       OCR_WORD_DETECTOR: ${OCR_WORD_DETECTOR:-doctr}
+      DESKEW_DEBUG: ${DESKEW_DEBUG:-}
       PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: "True"
       FLAGS_use_mkldnn: "0"
 #    depends_on:

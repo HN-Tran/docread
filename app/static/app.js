@@ -1962,6 +1962,10 @@ function applyOcrResponse(data, { requestMode, requestTask, backendFallback }) {
     pageImageDataUrls = data.page_images || [];
     currentPageIndex = 0;
     if (pageImageDataUrls.length > 0) {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+        previewUrl = null;
+      }
       populatePageSelector(pageImageDataUrls.length);
       showPageImage(0);
     } else {
