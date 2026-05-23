@@ -19,7 +19,15 @@ from typing import Any, cast
 from PIL import Image
 from rapidfuzz import fuzz
 
-from app.services.deskew import deskew_image, detect_cardinal_rotation
+from app.services.deskew import (
+    consume_deskew_debug_trace,
+    deskew_image,
+    detect_original_tilt,
+    normalize_ccw_angle,
+    open_rgb_image,
+    preview_angle_from_corrections,
+    round_deskew_correction_ccw,
+)
 from app.services.inference import InferenceError
 from app.services.inference.protocol import VisionLlmClient
 from app.services.inference.registry import VisionClientRegistry
@@ -438,6 +446,7 @@ class DocumentPipeline:
         text_anchor_threshold: float = 60.0,
         word_detector: WordDetector | None = None,
         layout_max_dim: int = 1800,
+        deskew_page_cardinal: bool = False,
     ) -> None:
         self.direct_pipeline = direct_pipeline
         self.vision_registry = vision_registry
@@ -455,6 +464,7 @@ class DocumentPipeline:
         self.layout_max_dim = max(256, int(layout_max_dim))
         # Inherited from direct_pipeline so both pipelines share one setting.
         self.deskew_enabled = bool(getattr(direct_pipeline, "deskew_enabled", False))
+        self.deskew_page_cardinal = deskew_page_cardinal
         self.deskew_min_angle_deg = float(getattr(direct_pipeline, "deskew_min_angle_deg", 0.5))
         self._detector_cache: dict[str, HFLayoutDetector] = {}
         self._table_recognizer: TableStructureRecognizer | None = None
@@ -523,6 +533,16 @@ class DocumentPipeline:
         crop.save(buf, format="PNG")
         return buf.getvalue()
 
+    @staticmethod
+    def _region_page_area_fraction(image: Image.Image, bbox: list[float]) -> float:
+        if len(bbox) != 4:
+            return 0.0
+        x1, y1, x2, y2 = (float(v) for v in bbox)
+        width = max(0.0, x2 - x1)
+        height = max(0.0, y2 - y1)
+        page_area = max(float(image.width * image.height), 1.0)
+        return (width * height) / page_area
+
     def _crop_region_image(self, image: Image.Image, bbox: list[float]) -> Image.Image | None:
         """Crop a region from the image; return PIL Image or None if too small."""
         img_w, img_h = image.size
@@ -573,6 +593,8 @@ class DocumentPipeline:
         model: str,
         detector: HFLayoutDetector,
         page_number: int,
+        original_page_image: Image.Image | None = None,
+        page_deskew_correction_ccw: float = 0.0,
         use_table_transformer: bool = False,
         per_region_ocr: bool = True,
         text_anchor: bool = True,
@@ -615,7 +637,7 @@ class DocumentPipeline:
         regions = _sort_reading_order(raw_regions)
 
         # 3. Build layout regions — crop OCR each, fuzzy-match against source text.
-        _CARDINAL_CONF_THRESHOLD = 0.70
+        _REGION_PAGE_AREA_SKIP = 0.40
         layout_regions: list[dict[str, object]] = []
         for idx, region in enumerate(regions):
             task_type = region.get("task_type", "text")
@@ -627,38 +649,55 @@ class DocumentPipeline:
                 "bbox_2d": region.get("bbox_2d"),
                 "polygon": region.get("polygon"),
                 "confidence": region.get("score"),
-                "region_angle": 0,
+                "angle": 0.0,
+                "deskew_correction_ccw": 0.0,
             }
+
+            angle_source = original_page_image if original_page_image is not None else image
+            original_crop = self._crop_region_image(
+                angle_source, region.get("bbox_2d", [0, 0, 0, 0])
+            )
+            region_crop_img = self._crop_region_image(image, region.get("bbox_2d", [0, 0, 0, 0]))
+            original_tilt = 0.0
+            region_deskew_net = 0.0
+            if original_crop is not None:
+                original_tilt = detect_original_tilt(
+                    original_crop, min_angle_deg=self.deskew_min_angle_deg
+                )
 
             if task_type == "skip":
                 layout_region["content"] = ""
             elif not per_region_ocr:
                 layout_region["content"] = ""
             else:
-                # Per-region cardinal orientation detection (handles multi-doc scans).
                 precomputed_crop: bytes | None = None
-                if self.deskew_enabled:
-                    crop_img = self._crop_region_image(image, region.get("bbox_2d", [0, 0, 0, 0]))
-                    if crop_img is not None:
-                        try:
-                            rot, conf = await asyncio.to_thread(detect_cardinal_rotation, crop_img)
-                        except Exception as exc:  # noqa: BLE001
-                            warnings.append(
-                                f"Region {idx} Orientierungserkennung fehlgeschlagen: {exc}"
-                            )
-                            rot, conf = 0, 0.0
-                        if rot != 0 and conf >= _CARDINAL_CONF_THRESHOLD:
-                            _TRANSPOSE = {
-                                90: Image.Transpose.ROTATE_90,
-                                180: Image.Transpose.ROTATE_180,
-                                270: Image.Transpose.ROTATE_270,
-                            }
-                            corrected = crop_img.transpose(_TRANSPOSE[rot])
+                region_area_frac = self._region_page_area_fraction(
+                    image, cast(list[float], region.get("bbox_2d", [0, 0, 0, 0]))
+                )
+                if (
+                    self.deskew_enabled
+                    and region_area_frac < _REGION_PAGE_AREA_SKIP
+                    and region_crop_img is not None
+                ):
+                    try:
+                        corrected_crop, region_net = await asyncio.to_thread(
+                            deskew_image,
+                            region_crop_img.copy(),
+                            min_angle_deg=self.deskew_min_angle_deg,
+                            allow_page_cardinal=True,
+                            deskew_context="region",
+                            debug_label=f"region {idx}",
+                        )
+                        region_crop_img = corrected_crop
+                        region_deskew_net = region_net
+                        if region_net != 0.0:
                             buf = io.BytesIO()
-                            corrected.save(buf, format="PNG")
+                            corrected_crop.save(buf, format="PNG")
                             precomputed_crop = buf.getvalue()
-                            layout_region["region_angle"] = rot
-                            warnings.append(f"Region {idx} ({label}): {rot}° CCW Rotation erkannt")
+                        for line in consume_deskew_debug_trace():
+                            warnings.append(f"Region {idx} deskew debug: {line}")
+                    except Exception as exc:  # noqa: BLE001
+                        warnings.append(f"Region {idx} Deskew fehlgeschlagen: {exc}")
 
                 try:
                     candidate = await self._ocr_region(
@@ -678,7 +717,9 @@ class DocumentPipeline:
 
                 # Table Transformer: detect precise cell bboxes for table regions.
                 if task_type == "table" and use_table_transformer:
-                    crop_img = self._crop_region_image(image, region.get("bbox_2d", [0, 0, 0, 0]))
+                    crop_img = region_crop_img or self._crop_region_image(
+                        image, region.get("bbox_2d", [0, 0, 0, 0])
+                    )
                     if crop_img is not None:
                         try:
                             raw_cells = self._get_table_recognizer().recognize(crop_img)
@@ -692,10 +733,21 @@ class DocumentPipeline:
                         except Exception as exc:  # noqa: BLE001
                             warnings.append(f"Region {idx} Table Transformer fehlgeschlagen: {exc}")
 
+            if original_crop is not None:
+                layout_region["angle"] = original_tilt
+                layout_region["preview_angle"] = preview_angle_from_corrections(
+                    original_tilt,
+                    page_correction_ccw=page_deskew_correction_ccw,
+                )
+                layout_region["deskew_correction_ccw"] = round_deskew_correction_ccw(
+                    region_deskew_net
+                )
+
             layout_regions.append(layout_region)
 
         page_layout: dict[str, object] = {
             "page_number": page_number,
+            "page_deskew_correction_ccw": page_deskew_correction_ccw,
             "regions": layout_regions,
         }
 
@@ -891,21 +943,16 @@ class DocumentPipeline:
 
         # Prepare pages (PDF or single image)
         pages: list[tuple[Image.Image, bytes]] = []
-        raw_page_images: list[bytes] | None = None
         if content_type == "application/pdf":
             rendered_pages, pdf_warnings = self.direct_pipeline._render_pdf_pages(image_bytes)
             warnings.extend(pdf_warnings)
-            raw_page_images = list(rendered_pages)
             for page_bytes in rendered_pages:
-                pages.append((Image.open(io.BytesIO(page_bytes)).convert("RGB"), page_bytes))
+                pages.append((open_rgb_image(page_bytes), page_bytes))
         else:
-            pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+            page_image = open_rgb_image(image_bytes)
             buf = io.BytesIO()
-            pil_img.save(buf, format="PNG")
-            png_bytes = buf.getvalue()
-            pages.append((pil_img, png_bytes))
-            if content_type in {"image/tif", "image/tiff", "image/x-tiff"}:
-                raw_page_images = [png_bytes]
+            page_image.save(buf, format="PNG")
+            pages.append((page_image, buf.getvalue()))
 
         # Get layout detector
         detector = self._get_detector(selected_layout_model, expert_layout_threshold)
@@ -914,29 +961,40 @@ class DocumentPipeline:
         layout: list[dict[str, object]] = []
         all_page_texts: list[str] = []
         page_infos: list[dict[str, object]] = []
+        preview_page_bytes: list[bytes] = []
         for page_idx, (page_image, page_bytes) in enumerate(pages):
             page_number = page_idx + 1
 
-            # Page-level deskew: correct cardinal rotation and fine skew before
-            # layout detection so regions are detected on a straight image.
-            page_angle = 0.0
+            # Page-level deskew from pixel content (scans have no reliable EXIF).
+            original_page_image = page_image.copy()
+            page_deskew_correction_ccw = 0.0
             if self.deskew_enabled:
                 try:
-                    page_image, page_angle = await asyncio.to_thread(
+                    page_image, deskew_ccw = await asyncio.to_thread(
                         deskew_image,
                         page_image,
                         min_angle_deg=self.deskew_min_angle_deg,
+                        debug_label=f"page {page_number}",
+                        allow_page_cardinal=self.deskew_page_cardinal,
                     )
-                    if page_angle != 0.0:
-                        buf = io.BytesIO()
-                        page_image.save(buf, format="PNG")
-                        page_bytes = buf.getvalue()
-                        deskew_msg = f"Deskew: {page_angle:.1f}° CCW Korrektur angewendet"
+                    page_deskew_correction_ccw = round_deskew_correction_ccw(deskew_ccw)
+                    if deskew_ccw != 0.0:
+                        shown = normalize_ccw_angle(deskew_ccw)
+                        deskew_msg = f"Deskew: {shown:.1f}° CCW Korrektur angewendet"
                         warnings.append(
                             f"Seite {page_number}: {deskew_msg}" if len(pages) > 1 else deskew_msg
                         )
+                    for line in consume_deskew_debug_trace():
+                        prefix = f"Seite {page_number}: " if len(pages) > 1 else ""
+                        warnings.append(f"{prefix}Deskew debug: {line}")
                 except Exception as exc:  # noqa: BLE001
                     warnings.append(f"Deskew fehlgeschlagen: {exc}")
+
+            # Keep OCR, layout, and UI preview on the same deskewed raster.
+            buf = io.BytesIO()
+            page_image.save(buf, format="PNG")
+            page_bytes = buf.getvalue()
+            preview_page_bytes.append(page_bytes)
 
             page_layout, page_text, page_warnings = await self._process_page(
                 page_image,
@@ -944,6 +1002,8 @@ class DocumentPipeline:
                 model=selected_model,
                 detector=detector,
                 page_number=page_number,
+                original_page_image=original_page_image,
+                page_deskew_correction_ccw=page_deskew_correction_ccw,
                 use_table_transformer=selected_table_transformer,
                 per_region_ocr=selected_per_region_ocr,
                 assemble_from_regions=selected_assemble_from_regions,
@@ -972,7 +1032,7 @@ class DocumentPipeline:
             page_infos.append(
                 {
                     "page_number": page_number,
-                    "angle": page_angle,
+                    "angle": page_deskew_correction_ccw,
                     "width": page_image.width,
                     "height": page_image.height,
                     "unit": "pixel",
@@ -1010,8 +1070,8 @@ class DocumentPipeline:
             page_texts=all_page_texts,
             markdown=text,
             page_images=(
-                await asyncio.to_thread(encode_page_images, raw_page_images)
-                if raw_page_images
+                await asyncio.to_thread(encode_page_images, preview_page_bytes)
+                if preview_page_bytes
                 else None
             ),
         )

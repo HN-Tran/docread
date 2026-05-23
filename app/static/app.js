@@ -597,6 +597,14 @@ function formatConfidence(value) {
   return numericValue.toFixed(2);
 }
 
+function formatLayoutAngle(degrees) {
+  const numericValue = Number(degrees);
+  if (!Number.isFinite(numericValue) || Math.abs(numericValue) < 0.05) {
+    return null;
+  }
+  return `${numericValue.toFixed(1)}°`;
+}
+
 function getRegionConfidence(region) {
   if (!region || typeof region !== "object") {
     return null;
@@ -786,15 +794,12 @@ function renderLayoutOverlay(layoutPages, pageIndex) {
     boxEl.dataset.regionKind = regionKind;
     boxEl.dataset.regionIndex = String(index);
     const contentPreview = truncateText(region.content || "", 80);
-    const confidenceValue = getRegionConfidence(region);
-    const confidenceLabel = formatConfidence(confidenceValue);
-    const labelWithConfidence = confidenceLabel ? `${label} (${confidenceLabel})` : label;
-    boxEl.title = contentPreview ? `${labelWithConfidence}: ${contentPreview}` : labelWithConfidence;
+    boxEl.title = contentPreview ? `${label}: ${contentPreview}` : label;
 
     const badgeEl = document.createElement("span");
     badgeEl.className = "preview-layout-badge";
     badgeEl.dataset.regionKind = regionKind;
-    badgeEl.textContent = confidenceLabel ? `${label} ${confidenceLabel}` : label;
+    badgeEl.textContent = label;
     if (polygonPoints) {
       const anchors = getPolygonBadgeAnchors(polygonPoints);
       if (anchors && percentages.width > 0 && percentages.height > 0) {
@@ -1304,6 +1309,37 @@ function renderLayoutPanel(layoutPages, visualizations, activePageIndex = null) 
         confidenceEl.className = "layout-region-confidence";
         confidenceEl.textContent = confidenceLabel;
         regionHeadEl.appendChild(confidenceEl);
+      }
+
+      const angleLabel = formatLayoutAngle(region.angle);
+      if (angleLabel) {
+        const angleEl = document.createElement("span");
+        angleEl.className = "layout-region-angle layout-region-angle-original";
+        angleEl.textContent = tr("layout_region_angle_original", { angle: angleLabel });
+        angleEl.title = tr("layout_region_angle_title");
+        regionHeadEl.appendChild(angleEl);
+      }
+
+      const previewAngleLabel = formatLayoutAngle(region.preview_angle);
+      if (previewAngleLabel) {
+        const previewAngleEl = document.createElement("span");
+        previewAngleEl.className = "layout-region-angle layout-region-angle-preview";
+        previewAngleEl.textContent = tr("layout_region_angle_preview", {
+          angle: previewAngleLabel,
+        });
+        previewAngleEl.title = tr("layout_region_preview_angle_title");
+        regionHeadEl.appendChild(previewAngleEl);
+      }
+
+      const correctionAngleLabel = formatLayoutAngle(region.deskew_correction_ccw);
+      if (correctionAngleLabel) {
+        const correctionAngleEl = document.createElement("span");
+        correctionAngleEl.className = "layout-region-angle layout-region-angle-correction";
+        correctionAngleEl.textContent = tr("layout_region_deskew_correction", {
+          angle: correctionAngleLabel,
+        });
+        correctionAngleEl.title = tr("layout_region_deskew_correction_title");
+        regionHeadEl.appendChild(correctionAngleEl);
       }
 
       const metaEl = document.createElement("span");
@@ -1912,7 +1948,7 @@ function applyOcrResponse(data, { requestMode, requestTask, backendFallback }) {
   lastOcrApplyContext = { requestMode, requestTask, backendFallback };
   setAdvancedDirty(false);
   let displayText = data.text || tr("no_content");
-  const markdownPreview = typeof data.markdown === "string" ? data.markdown : "";
+  const markdownField = typeof data.markdown === "string" ? data.markdown : "";
   let tableMatrices = [];
 
   if (requestMode === "plain" && requestTask === "extract_table_markdown") {
@@ -1955,13 +1991,18 @@ function applyOcrResponse(data, { requestMode, requestTask, backendFallback }) {
     if (diffGroupsEl) diffGroupsEl.classList.add("hidden");
     diffEmptyEl?.classList.remove("hidden");
     clearDiffPanel();
-    renderMarkdownPreview(markdownPreview);
+    const previewSource = markdownField.trim() ? markdownField : displayText;
+    renderMarkdownPreview(previewSource);
     renderTablePreview(tableMatrices);
     const layoutPages = normalizeLayoutPages(data.layout);
 
     pageImageDataUrls = data.page_images || [];
     currentPageIndex = 0;
     if (pageImageDataUrls.length > 0) {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+        previewUrl = null;
+      }
       populatePageSelector(pageImageDataUrls.length);
       showPageImage(0);
     } else {
@@ -1976,7 +2017,7 @@ function applyOcrResponse(data, { requestMode, requestTask, backendFallback }) {
       hasLayout:
         layoutPages.length > 0 ||
         (Array.isArray(data.layout_visualizations) && data.layout_visualizations.length > 0),
-      hasMarkdown: markdownPreview.trim().length > 0,
+      hasMarkdown: previewSource.trim().length > 0,
       hasMetrics: !!lastMetrics,
     });
     lastTableMatrices = tableMatrices;

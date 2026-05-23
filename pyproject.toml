@@ -33,6 +33,7 @@ dependencies = [
 [project.optional-dependencies]
 paddle = ["paddlepaddle>=2.6.0", "paddleocr>=3.0.0"]
 mlflow = ["mlflow>=2.16.0,<3.0.0"]
+osd = ["pytesseract>=0.3.13"]
 
 [dependency-groups]
 dev = [
@@ -91,5 +92,7 @@ module = [
     "paddlex.*",
     "mlflow",
     "mlflow.*",
+    "pytesseract",
+    "pytesseract.*",
 ]
 ignore_missing_imports = true
