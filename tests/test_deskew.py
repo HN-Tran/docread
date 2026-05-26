@@ -22,6 +22,256 @@ def _text_image() -> Image.Image:
     return img
 
 
+def test_pick_fine_skew_prefers_horizontal_tiles_over_diamond_zone() -> None:
+    """Table grids can peak at ~45° while text tiles read near 0°."""
+    from app.services.deskew import _is_skew_tile_source, _pick_fine_skew_from_candidates
+
+    candidates = [
+        (-49.0, "content_bbox"),
+        (-45.0, "tile_0_0"),
+        (-49.5, "tile_1_1"),
+        (-1.0, "probe_tile_1_2"),
+        (2.5, "probe_tile_0_1"),
+        (2.0, "tile_2_2"),
+    ]
+    angle, source = _pick_fine_skew_from_candidates(candidates, default_source="content_bbox")
+    assert abs(angle - 2.5) <= 1.0, (angle, source)
+    assert _is_skew_tile_source(source) or source == "tile_consensus"
+
+
+def test_region_skew_hint_does_not_override_tile_consensus() -> None:
+    from app.services.deskew import _pick_fine_skew_from_candidates
+
+    candidates = [
+        (-10.0, "content_bbox"),
+        (-51.0, "full_page"),
+        (3.0, "tile_0_1"),
+        (2.5, "tile_1_2"),
+        (1.5, "tile_2_1"),
+        (2.0, "probe_tile_1_1"),
+    ]
+    angle, source = _pick_fine_skew_from_candidates(
+        candidates,
+        default_source="content_bbox",
+        cardinal_skew_hint=-10.0,
+        trust_cardinal_skew_hint=False,
+    )
+    assert angle > 0.0, (angle, source)
+    assert abs(angle - 2.5) <= 1.0, (angle, source)
+
+
+def _table_with_diagonal_grid(*, text_skew_deg: float = 5.0) -> Image.Image:
+    """Simulate a table: horizontal text with a diagonal grid that confuses projection."""
+    doc = Image.new("RGB", (900, 700), "white")
+    draw = ImageDraw.Draw(doc)
+    for offset in range(-900, 900, 28):
+        draw.line((offset, 0, offset + 700, 700), fill=(210, 210, 210), width=1)
+        draw.line((offset, 700, offset + 700, 0), fill=(210, 210, 210), width=1)
+    for row, label in enumerate(("Pos", "3.1", "3.2", "3.3", "3.4", "3.5", "3.6")):
+        y = 80 + row * 42
+        for index, char in enumerate(f"{label}  1,000 ST  Grundfos Kondensat"):
+            draw.text((40 + index * 14, y), char, fill="black")
+    if text_skew_deg:
+        doc = doc.rotate(text_skew_deg, expand=True, fillcolor="white")
+    return doc
+
+
+def test_slightly_skewed_table_not_overcorrected_to_diamond_zone() -> None:
+    """Regression: ~5° scanner tilt must not become ~45° from table grid lines."""
+    doc = _table_with_diagonal_grid(text_skew_deg=5.0)
+    page = Image.new("RGB", (1500, 2000), "white")
+    page.paste(doc, ((page.width - doc.width) // 2, (page.height - doc.height) // 2))
+    _, net = deskew_image(page)
+    assert abs(net) <= 10.0, net
+
+
+def test_pick_fine_skew_zero_hint_does_not_block_tile_consensus() -> None:
+    from app.services.deskew import _pick_fine_skew_from_candidates
+
+    candidates = [
+        (-49.0, "content_bbox"),
+        (-1.0, "probe_tile_1_2"),
+        (2.0, "probe_tile_2_2"),
+    ]
+    angle, source = _pick_fine_skew_from_candidates(
+        candidates,
+        default_source="content_bbox",
+        cardinal_skew_hint=0.0,
+        min_angle_deg=0.5,
+    )
+    assert abs(angle) <= 2.0, (angle, source)
+
+
+def test_small_island_ignores_spurious_content_bbox_diamond_skew() -> None:
+    """Regression: curved book with ~43° content_bbox must not beat a lone near-upright tile."""
+    from app.services.deskew import _pick_fine_skew_from_candidates
+
+    candidates = [
+        (43.0, "content_bbox"),
+        (-90.0, "full_page"),
+        (-90.0, "tight_text"),
+        (-48.5, "tile_0_0"),
+        (0.0, "tile_0_1"),
+        (-90.0, "tile_0_2"),
+        (-90.0, "tile_1_0"),
+        (0.0, "tile_1_1"),
+        (-90.0, "tile_1_2"),
+        (0.0, "tile_2_0"),
+        (0.0, "tile_2_1"),
+        (-90.0, "tile_2_2"),
+        (-38.5, "probe_tile_0_0"),
+        (-38.5, "probe_tile_0_1"),
+        (-46.5, "probe_tile_0_2"),
+        (-43.5, "probe_tile_1_0"),
+        (-46.0, "probe_tile_1_1"),
+        (-49.0, "probe_tile_1_2"),
+        (-45.0, "probe_tile_2_0"),
+        (-47.5, "probe_tile_2_1"),
+        (-5.0, "probe_tile_2_2"),
+    ]
+    angle, source = _pick_fine_skew_from_candidates(
+        candidates,
+        default_source="content_bbox",
+        cardinal_skew_hint=0.0,
+        min_angle_deg=0.5,
+        cardinal_branch="small_island_upright",
+    )
+    assert abs(angle) < 0.5, (angle, source)
+
+
+def test_small_island_upright_skips_page_fine_skew_without_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Curved book on large page: leave page upright; regions correct locally."""
+    monkeypatch.setenv("DESKEW_DEBUG", "1")
+    page = Image.new("RGB", (1500, 2000), "white")
+
+    monkeypatch.setattr(
+        "app.services.deskew._pick_cardinal_orientation",
+        lambda _img, **kwargs: (0, "small_island_upright", 0.0),
+    )
+
+    _, net = deskew_image(page)
+    trace = consume_deskew_debug_trace()
+    assert net == 0.0, net
+    assert any("small_island_no_upright_hint" in line for line in trace)
+
+
+def test_full_page_mixed_sign_tiles_skip_fine_skew() -> None:
+    from app.services.deskew import _pick_fine_skew_from_candidates
+
+    candidates = [
+        (-90.0, "full_page"),
+        (-1.5, "tile_0_0"),
+        (0.0, "tile_0_1"),
+        (0.0, "tile_1_0"),
+        (0.0, "tile_1_1"),
+        (0.0, "tile_2_0"),
+        (1.5, "tile_2_1"),
+        (-90.0, "tile_2_2"),
+    ]
+    angle, source = _pick_fine_skew_from_candidates(
+        candidates,
+        default_source="full_page",
+        min_angle_deg=0.5,
+    )
+    assert abs(angle) < 0.5, (angle, source)
+
+
+def test_diamond_zone_upright_hint_needs_two_tiles(monkeypatch: pytest.MonkeyPatch) -> None:
+    from PIL import Image
+
+    from app.services.deskew import _diamond_zone_upright_skew_hint
+
+    monkeypatch.setattr(
+        "app.services.deskew._skew_tile_candidates",
+        lambda _img: [(-5.0, "tile_2_2")],
+    )
+    assert _diamond_zone_upright_skew_hint(Image.new("RGB", (100, 100), "white")) == 0.0
+
+
+def test_pick_fine_skew_uses_cardinal_hint_over_diamond_zone() -> None:
+    from app.services.deskew import _pick_fine_skew_from_candidates
+
+    candidates = [
+        (40.0, "content_bbox"),
+        (-50.0, "full_page"),
+        (40.0, "tile_2_2"),
+    ]
+    angle, source = _pick_fine_skew_from_candidates(
+        candidates,
+        default_source="content_bbox",
+        cardinal_skew_hint=-5.0,
+        min_angle_deg=0.5,
+        trust_cardinal_skew_hint=True,
+    )
+    assert abs(angle + 5.0) < 0.1, (angle, source)
+    assert source == "content_bbox"
+
+
+def test_diamond_zone_near_horizontal_returns_without_sideways(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: diamond-zone conflict must return upright, not fall through to sideways."""
+    from PIL import Image
+
+    from app.services.deskew import _pick_cardinal_on_probe
+
+    monkeypatch.setenv("DESKEW_DEBUG", "1")
+    probe = Image.new("RGB", (284, 304), "white")
+    monkeypatch.setattr("app.services.deskew.detect_page_angle", lambda _img: -49.0)
+    monkeypatch.setattr(
+        "app.services.deskew._diamond_zone_skew_conflicts_with_tiles",
+        lambda _probe, _hint, **kwargs: True,
+    )
+    monkeypatch.setattr(
+        "app.services.deskew._diamond_zone_upright_skew_hint",
+        lambda _probe, **kwargs: 1.5,
+    )
+
+    cardinal, branch, hint = _pick_cardinal_on_probe(
+        probe,
+        min_angle_deg=0.5,
+        probe_source="content_bbox",
+        content_fill=0.029,
+        full_img=Image.new("RGB", (1500, 2000), "white"),
+    )
+    assert cardinal == 0
+    assert branch == "diamond_zone_near_horizontal"
+    assert hint == 1.5
+
+
+def test_small_island_upright_skips_sideways_on_tiny_content_bbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from PIL import Image
+
+    from app.services.deskew import _pick_cardinal_on_probe
+
+    monkeypatch.setenv("DESKEW_DEBUG", "1")
+    probe = Image.new("RGB", (284, 304), "white")
+    monkeypatch.setattr("app.services.deskew.detect_page_angle", lambda _img: -49.0)
+    monkeypatch.setattr(
+        "app.services.deskew._diamond_zone_skew_conflicts_with_tiles",
+        lambda _probe, _hint, **kwargs: False,
+    )
+    monkeypatch.setattr(
+        "app.services.deskew._diamond_zone_upright_skew_hint",
+        lambda _probe, **kwargs: 2.0,
+    )
+
+    cardinal, branch, hint = _pick_cardinal_on_probe(
+        probe,
+        min_angle_deg=0.5,
+        probe_source="content_bbox",
+        content_fill=0.029,
+        full_img=Image.new("RGB", (1500, 2000), "white"),
+    )
+    assert cardinal == 0
+    assert branch == "small_island_upright"
+    assert hint == 2.0
+
+
 def test_open_rgb_image_ignores_exif_orientation() -> None:
     source = _text_image()
     exif = source.getexif()
@@ -122,6 +372,26 @@ def test_detect_preview_tilt_upside_down_includes_cardinal_and_fine() -> None:
     upside_down = doc.transpose(Image.Transpose.ROTATE_180)
     tilt = detect_preview_tilt(upside_down)
     assert abs(tilt) >= 175.0, tilt
+
+
+def test_region_narrow_strip_skips_upside_down_flip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: wide table-row crops must not get a spurious 180° + fine skew."""
+    monkeypatch.setenv("DESKEW_DEBUG", "1")
+    monkeypatch.setattr("app.services.deskew._osd_cardinal_ccw", lambda _img, **kwargs: None)
+
+    strip = Image.new("RGB", (1100, 160), "white")
+    draw = ImageDraw.Draw(strip)
+    for index, char in enumerate("Einh. Text    Einzelpreis    Gesamt"):
+        draw.text((40 + index * 16, 70), char, fill="black")
+    strip = strip.rotate(5, expand=True, fillcolor="white")
+
+    _, net = deskew_image(strip, deskew_context="region", debug_label="region 2")
+    trace = consume_deskew_debug_trace()
+    assert abs(net) <= 10.0, net
+    assert any("region_fine_skew_only" in line for line in trace)
+    assert not any("cardinal_ccw=180" in line for line in trace)
 
 
 def test_region_deskew_skips_landscape_flip_on_fine_skew_only(
