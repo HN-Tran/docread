@@ -62,7 +62,7 @@ When pages are harder than a flat scan, Dev mode runs a full document pipeline:
 - **REST API** with Swagger UI (`/docs`), ReDoc (`/redoc`), and OpenAPI JSON.
 - **Web UI** at `/` — drag-and-drop upload, layout/word/markdown/diff views, EN/DE locale.
 - **Azure Document Intelligence compatibility** — `prebuilt-read` sync and async analyze endpoints.
-- **Docker Compose** — CPU default; optional NVIDIA/AMD GPU stacks; bundled Ollama + GLM-OCR stack file.
+- **Docker Compose** — app container (CPU default; optional NVIDIA/AMD GPU for layout); stack file bundles docread + llama.cpp GLM-OCR. Host Ollama supported via default env.
 
 ## Privacy & data sovereignty
 
@@ -553,68 +553,53 @@ Notes:
 
 ## Docker (isolated execution and testing)
 
-Build and start the app:
+### App only (host Ollama)
+
+Install **Ollama on the host**, pull a vision model, then start the **docread app** container (it calls the host at `http://172.17.0.1:11434` by default — `OLLAMA_BASE_URL` in `.env`):
 
 ```bash
-docker compose up --build
+ollama pull glm-ocr:latest
+docker compose up --build -d
 ```
 
 Open: `http://127.0.0.1:8000`
 
 UI language defaults to English (`APP_LOCALE=en`). Use the **EN / DE** toggle next to the theme control, or set `APP_LOCALE=de` in `.env`. Preference is stored in a cookie and `localStorage`.
 
-Docker persists downloaded models in the `docread_model_cache` volume (`/home/appuser/.cache`). Default image uses **CPU** PyTorch (`Dockerfile`). GPU layout uses official base images (see [`docs/docker-pytorch.md`](docs/docker-pytorch.md)):
+An optional **Ollama service** block exists in `docker-compose.yml` but is commented out; uncomment it if you want Ollama inside Compose instead of on the host.
+
+Docker persists downloaded layout models in the `docread_model_cache` volume (`/home/appuser/.cache`).
+
+### App + bundled GLM-OCR (no host Ollama)
+
+Self-contained: **docread** plus a **llama.cpp** GLM-OCR server on the same Docker network (`docker-compose.stack.yml` includes `docker-compose.llamacpp.yml`). First run downloads GGUF weights into the `llamacpp_cache` volume. Vulkan, ROCm, and CUDA variants: [`docs/llamacpp-docker-glm-ocr.md`](docs/llamacpp-docker-glm-ocr.md).
+
+```bash
+docker compose -f docker-compose.stack.yml up --build -d
+```
+
+### GPU layout (optional)
+
+Default image uses **CPU** PyTorch for layout models (`Dockerfile`). For GPU layout detection, use the compose overlays (see [`docs/docker-pytorch.md`](docs/docker-pytorch.md)):
 
 ```bash
 # NVIDIA — Dockerfile.cuda (pytorch/pytorch)
-docker compose -f docker-compose.yml -f docker-compose.cuda.yml up --build
+docker compose -f docker-compose.yml -f docker-compose.cuda.yml up --build -d
 
 # AMD — Dockerfile.rocm (rocm/pytorch)
-docker compose -f docker-compose.yml -f docker-compose.rocm.yml up --build
+docker compose -f docker-compose.yml -f docker-compose.rocm.yml up --build -d
 ```
 
-GPU vision LLM uses **llama.cpp** ([`docs/llamacpp-docker-glm-ocr.md`](docs/llamacpp-docker-glm-ocr.md)), not PyTorch Vulkan.
+Vision LLM inference on GPU uses **llama.cpp** (stack file or `docker-compose.llamacpp.yml`), not PyTorch in the app image.
 
-Inference env vars (`INFERENCE_PROVIDER`, `INFERENCE_BASE_URL`, `INFERENCE_MODEL`, …) are wired in `docker-compose.yml` and read from `.env`. For docread + bundled GLM-OCR:
+Inference env vars (`INFERENCE_PROVIDER`, `INFERENCE_BASE_URL`, `INFERENCE_MODEL`, …) are wired in `docker-compose.yml` and read from `.env`.
 
-```bash
-docker compose -f docker-compose.stack.yml up --build
-```
+### Tests
 
-GPU notes:
-
-- Compose is configured for NVIDIA GPUs on the `ollama` service.
-- Requires NVIDIA drivers + NVIDIA Container Toolkit on the host.
-- Optional overrides:
-  - `DEFAULT_TOKEN_LIMIT` (default: `16384`)
-  - `OLLAMA_GPU_DEVICES` (default: `all`)
-  - `NVIDIA_VISIBLE_DEVICES` (default: `all`)
-  - `NVIDIA_DRIVER_CAPABILITIES` (default: `compute,utility`)
-
-Load the OCR model in Ollama (once):
-
-```bash
-docker compose exec ollama ollama pull glm-ocr:latest
-```
-
-Check if GPU is being used after a request:
-
-```bash
-docker compose exec ollama ollama ps
-```
-
-`PROCESSOR` should show `GPU` instead of `CPU`.
-
-Run isolated quality checks + tests:
+Run isolated quality checks (one-off container, does not need the app running):
 
 ```bash
 docker compose --profile test run --rm test
-```
-
-Stop containers:
-
-```bash
-docker compose down
 ```
 
 ## License

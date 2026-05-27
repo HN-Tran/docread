@@ -62,7 +62,7 @@ Bei schwierigeren Seiten als flache Scans läuft eine vollständige Pipeline:
 - **REST-API** mit Swagger (`/docs`), ReDoc (`/redoc`) und OpenAPI-JSON.
 - **Web-UI** unter `/` — Drag-and-Drop, Layout/Wort/Markdown/Diff-Ansichten, EN/DE.
 - **Azure Document Intelligence Kompatibilität** — `prebuilt-read` Sync- und Async-Analyse.
-- **Docker Compose** — CPU-Standard; optional NVIDIA/AMD-GPU; Stack mit Ollama + GLM-OCR.
+- **Docker Compose** — App-Container (CPU-Standard; optional NVIDIA/AMD-GPU für Layout); Stack-Datei bündelt docread + llama.cpp GLM-OCR. Host-Ollama über Standard-Env.
 
 ## Datenschutz & Datenhoheit
 
@@ -575,68 +575,53 @@ Hinweise:
 
 ## Docker (isoliertes Ausführen und Testen)
 
-App + Ollama bauen und starten:
+### Nur App (Host-Ollama)
+
+**Ollama auf dem Host** installieren, Vision-Modell laden, dann den **docread**-Container starten (Standard: Host unter `http://172.17.0.1:11434` — `OLLAMA_BASE_URL` in `.env`):
 
 ```bash
-docker compose up --build
+ollama pull glm-ocr:latest
+docker compose up --build -d
 ```
 
 Öffnen: `http://127.0.0.1:8000`
 
 UI-Sprache standardmäßig Englisch (`APP_LOCALE=en`). Umschalten über **EN / DE** neben dem Theme oder `APP_LOCALE=de` in `.env`. Die Wahl wird in Cookie und `localStorage` gespeichert.
 
-Standard-Image nutzt **CPU**-PyTorch (`Dockerfile`). GPU-Layouts über offizielle Basis-Images (siehe [`docs/docker-pytorch.md`](docs/docker-pytorch.md)):
+Ein optionaler **Ollama-Service** in `docker-compose.yml` ist auskommentiert; zum Betrieb in Compose statt auf dem Host einkommentieren.
+
+Layout-Modelle landen im Volume `docread_model_cache` (`/home/appuser/.cache`).
+
+### App + gebündeltes GLM-OCR (ohne Host-Ollama)
+
+Alles in Docker: **docread** plus **llama.cpp** mit GLM-OCR im gleichen Netz (`docker-compose.stack.yml` bindet `docker-compose.llamacpp.yml` ein). Beim ersten Start werden GGUF-Gewichte in `llamacpp_cache` geladen. Varianten Vulkan/ROCm/CUDA: [`docs/llamacpp-docker-glm-ocr.md`](docs/llamacpp-docker-glm-ocr.md).
+
+```bash
+docker compose -f docker-compose.stack.yml up --build -d
+```
+
+### GPU-Layout (optional)
+
+Standard-Image nutzt **CPU**-PyTorch für Layout-Modelle (`Dockerfile`). Für GPU-Layout die Compose-Overlays (siehe [`docs/docker-pytorch.md`](docs/docker-pytorch.md)):
 
 ```bash
 # NVIDIA — Dockerfile.cuda
-docker compose -f docker-compose.yml -f docker-compose.cuda.yml up --build
+docker compose -f docker-compose.yml -f docker-compose.cuda.yml up --build -d
 
 # AMD — Dockerfile.rocm
-docker compose -f docker-compose.yml -f docker-compose.rocm.yml up --build
+docker compose -f docker-compose.yml -f docker-compose.rocm.yml up --build -d
 ```
 
-Vision-LLM auf der GPU typischerweise über **llama.cpp** ([`docs/llamacpp-docker-glm-ocr.md`](docs/llamacpp-docker-glm-ocr.md)), nicht PyTorch-Vulkan.
+Vision-LLM-Inference auf der GPU läuft über **llama.cpp** (Stack-Datei oder `docker-compose.llamacpp.yml`), nicht über PyTorch im App-Image.
 
-Inference-Env-Variablen (`INFERENCE_PROVIDER`, `INFERENCE_BASE_URL`, `INFERENCE_MODEL`, …) stehen in `docker-compose.yml` und `.env`. Stack mit gebündeltem Setup:
+Inference-Env-Variablen (`INFERENCE_PROVIDER`, `INFERENCE_BASE_URL`, `INFERENCE_MODEL`, …) stehen in `docker-compose.yml` und `.env`.
 
-```bash
-docker compose -f docker-compose.stack.yml up --build
-```
+### Tests
 
-GPU-Hinweise:
-
-- Compose ist für den `ollama`-Service auf NVIDIA-GPUs konfiguriert.
-- Erfordert NVIDIA-Treiber + NVIDIA Container Toolkit auf dem Host.
-- Optionale Overrides:
-  - `DEFAULT_TOKEN_LIMIT` (Standard: `16384`)
-  - `OLLAMA_GPU_DEVICES` (Standard: `all`)
-  - `NVIDIA_VISIBLE_DEVICES` (Standard: `all`)
-  - `NVIDIA_DRIVER_CAPABILITIES` (Standard: `compute,utility`)
-
-OCR-Modell in Ollama laden (einmalig):
-
-```bash
-docker compose exec ollama ollama pull glm-ocr:latest
-```
-
-Prüfen, ob nach einer Anfrage GPU genutzt wird:
-
-```bash
-docker compose exec ollama ollama ps
-```
-
-Bei `PROCESSOR` sollte `GPU` statt `CPU` stehen.
-
-Isolierte Qualitätsprüfungen + Tests ausführen:
+Isolierte Qualitätsprüfungen (einmaliger Container, App muss nicht laufen):
 
 ```bash
 docker compose --profile test run --rm test
-```
-
-Container stoppen:
-
-```bash
-docker compose down
 ```
 
 ## Lizenz
