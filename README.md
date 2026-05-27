@@ -1,6 +1,8 @@
-[English](README.md) · [Deutsch](README_DE.md)
+<p align="center">
+  <a href="README.md">English</a> · <a href="README_DE.md">Deutsch</a>
+</p>
 
-# docread
+<h1 align="center">docread</h1>
 
 <p align="center">
   <a href="https://github.com/HN-Tran/docread/actions/workflows/ci.yml"><img src="https://github.com/HN-Tran/docread/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
