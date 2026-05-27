@@ -14,17 +14,72 @@
 <p align="center"><strong>Self-hosted document OCR with vision language models</strong></p>
 
 <p align="center">
-  Turn scans and PDFs into text on your own stack. Use Ollama or any OpenAI-compatible vision model,
-  preview results in the browser, compare against Azure or Google Vision, and benchmark accuracy with optional reference text.
+  Turn scans, photos, and PDFs into text on infrastructure you control — with a browser UI,
+  a production REST API, and drop-in compatibility with Azure Document Intelligence.
 </p>
+
+## Why docread?
+
+Most OCR setups force a trade-off: send documents to a cloud API (per-page cost, data leaves your network), or stitch together open-source tools that struggle with crooked camera shots, table grids, and multi-page PDFs. **docread is one self-hosted app** that runs modern vision LLMs locally, straightens messy scans before OCR, and still speaks the APIs your existing tools already expect.
+
+## At a glance
+
+| Capability | What you get |
+|------------|--------------|
+| **Your stack, your data** | Ollama, vLLM, llama.cpp, or any OpenAI-compatible vision server — no vendor lock-in, no outbound document upload. |
+| **Two modes, one install** | **Direct** (`backend=direct`) for fast full-page OCR; **Dev** (`backend=expert`) for layout regions, tables, word boxes, and per-region deskew on difficult scans. |
+| **Real-world scan handling** | Automatic deskew and quarter-turn detection (Tesseract OSD, projection variance, tiled fine skew) — built for A4 margins, curved book photos, and small content islands on large pages. |
+| **See what the model saw** | Interactive preview with layout overlays, word polygons, markdown output, and per-region tilt metadata. |
+| **Prove accuracy in-house** | Side-by-side compare against Azure, Google Vision, or another docread instance; batch benchmark with CER/WER when you have reference text; optional MLflow tracking. |
+| **Drop-in for Azure workflows** | `prebuilt-read` sync/async endpoints compatible with Azure Document Intelligence (formerly Form Recognizer). |
+| **Data sovereignty & privacy** | Self-hosted by design — no mandatory cloud OCR, no telemetry to the project maintainers; suitable for on-premises, private cloud, and air-gapped deployments when you control inference and storage. |
 
 ## Features
 
-- REST API with **Swagger UI** at `/docs`, **ReDoc** at `/redoc`, and **`/openapi.json`**; web UI at `/` for document OCR (plain text or structured JSON from images, PDF, and Word).
-- **Direct mode** for fast full-page OCR with Ollama or any OpenAI-compatible vision model you host.
-- **Dev mode** adds layout regions, table cells, word-level boxes, and automatic deskew for camera scans.
-- **Compare and benchmark** against Azure, Google Vision, another docread instance, or your own HTTP endpoint; optional CER/WER when you provide reference text.
-- Offline **evaluation** runner on a fixed sample set to catch regressions.
+### Direct mode — fast full-page OCR (`backend=direct`)
+
+Point a vision model at the whole page and get text back in seconds. Ideal for clean PDFs, quick extraction, and structured JSON when you define a schema. Works with any model your inference backend exposes (GLM-OCR, Qwen-VL, etc.).
+
+### Dev mode — layout-aware document understanding (`backend=expert`)
+
+When pages are harder than a flat scan, Dev mode runs a full document pipeline:
+
+- **Layout detection** — finds text blocks, titles, tables, and figures (PP-DocLayoutV3 by default).
+- **Per-region OCR** — each crop is sent to the vision model separately for better accuracy on dense pages.
+- **Smart deskew** — page-level cardinal orientation plus region-level fine skew for camera captures and table strips.
+- **Table cells** — optional Microsoft Table Transformer for cell-level bounding boxes.
+- **Word polygons** — DocTR or PaddleOCR word boxes overlaid on the preview.
+- **Text anchoring** — fuzzy-match region OCR back to full-page text to reduce duplication artifacts.
+
+### Evaluation & benchmarking
+
+- **Compare** (`POST /api/compare`) — run docread against Azure, Google Vision, a peer instance, or any HTTP text endpoint; token-level diff and optional CER/WER against ground truth.
+- **Benchmark** (`/benchmark` UI or `POST /api/benchmark`) — batch many files × many models/runners with aggregate metrics and CSV export.
+- **Offline eval** (`eval/run`) — regression suite on a fixed sample set with a manifest of expected text.
+
+### Integrations
+
+- **REST API** with Swagger UI (`/docs`), ReDoc (`/redoc`), and OpenAPI JSON.
+- **Web UI** at `/` — drag-and-drop upload, layout/word/markdown/diff views, EN/DE locale.
+- **Azure Document Intelligence compatibility** — `prebuilt-read` sync and async analyze endpoints.
+- **Docker Compose** — CPU default; optional NVIDIA/AMD GPU stacks; bundled Ollama + GLM-OCR stack file.
+
+## Privacy & data sovereignty
+
+docread is built for organizations that cannot send citizen files, case documents, or internal records to third-party cloud OCR APIs — **municipalities, agencies, healthcare, legal, and regulated industries**.
+
+| Concern | How docread helps |
+|---------|-------------------|
+| **Data residency (EU / GDPR)** | Processing stays on **your** infrastructure. You choose where the app and vision model run (EU datacenter, government private cloud, offline site). |
+| **No vendor lock-in or telemetry** | The application does **not** send documents or usage data to the project maintainers. Outbound traffic is limited to what **you** configure: your inference server, optional compare engines, and (once) model downloads you control. |
+| **Air-gapped / isolated networks** | Runnable offline after models and layout weights are cached. Inference via local Ollama or llama.cpp on the same network segment — no Internet required at OCR time. |
+| **Replace cloud OCR gradually** | Azure Document Intelligence–compatible endpoints let existing integrations target an **on-premises** docread instance instead of a public cloud API. |
+| **Operational control** | You govern retention: async analyze results (`ANALYZE_STORE_DIR`), benchmark job TTL, logs, TLS, and access via your reverse proxy and IAM. |
+| **Transparency** | Apache 2.0, auditable source, standard Docker deployment on VMs or Kubernetes under your security baseline. |
+
+**What we do not claim:** docread is **software**, not a certified compliance product. There is no “GDPR certificate” for an app. We do **not** state ISO 27001, SOC 2, BSI IT-Grundschutz, or sector approvals — those belong to **your** deployment, processes, and (where needed) a DPIA / legal review. Optional compare and benchmark features can call **third-party** APIs (Azure, Google); disable them or keep them in isolated non-production environments if policy requires.
+
+**Typical public-sector setup:** docread plus a local vision model on government-managed hardware, no external OCR in production, compare mode only in a non-production test environment if needed.
 
 ## Requirements
 
