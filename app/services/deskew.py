@@ -515,11 +515,12 @@ def _page_tiles_indicate_upright(
         return False
     near_zero = sum(1 for angle in page_angles if abs(angle) < min_angle_deg)
     meaningful = [
-        angle
-        for angle in page_angles
-        if min_angle_deg <= abs(angle) <= _NEAR_HORIZONTAL_MAX_DEG
+        angle for angle in page_angles if min_angle_deg <= abs(angle) <= _NEAR_HORIZONTAL_MAX_DEG
     ]
-    if near_zero >= max(3, int(len(page_angles) * 0.55)) and len(meaningful) < _DIAMOND_ZONE_TILE_MIN:
+    if (
+        near_zero >= max(3, int(len(page_angles) * 0.55))
+        and len(meaningful) < _DIAMOND_ZONE_TILE_MIN
+    ):
         return True
     positives = [angle for angle in meaningful if angle > min_angle_deg]
     negatives = [angle for angle in meaningful if angle < -min_angle_deg]
@@ -808,10 +809,7 @@ def _deskew_from_cardinal(
     skip_page_fine_skew = (
         cardinal_branch == "small_island_upright"
         and deskew_context == "page"
-        and (
-            cardinal_skew_hint is None
-            or abs(cardinal_skew_hint) < min_angle_deg
-        )
+        and (cardinal_skew_hint is None or abs(cardinal_skew_hint) < min_angle_deg)
     )
     if skip_page_fine_skew:
         _deskew_debug("fine_skew_skip", reason="small_island_no_upright_hint")
@@ -969,7 +967,9 @@ def _pick_cardinal_on_probe(
         else max(min_angle_deg, _SKEW_ONLY_CARDINAL_MIN_DEG)
     )
     if skew_only_min <= abs(skew_hint) < _NEAR_CARDINAL_SKEW_DEG:
-        if _diamond_zone_skew_conflicts_with_tiles(tile_img, skew_hint, min_angle_deg=min_angle_deg):
+        if _diamond_zone_skew_conflicts_with_tiles(
+            tile_img, skew_hint, min_angle_deg=min_angle_deg
+        ):
             upright_hint = _diamond_zone_upright_skew_hint(tile_img, min_angle_deg=min_angle_deg)
             _deskew_debug(
                 "pick_result",
