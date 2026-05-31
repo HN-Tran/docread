@@ -54,6 +54,8 @@ def _base_settings(**overrides: object) -> Settings:
         "max_upload_bytes": 8 * 1024 * 1024,
         "max_image_dim": 2048,
         "verify_ssl": False,
+        "outbound_allow_hosts": (),
+        "outbound_allow_private": False,
         "deskew_enabled": False,
         "deskew_page_cardinal": False,
         "deskew_min_angle_deg": 0.5,

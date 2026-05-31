@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 from typing import Any
 
-import httpx
+from app.services.safe_http import create_safe_async_client
 
 from .base import EngineResult
 
@@ -102,7 +102,9 @@ class GoogleVisionEngine:
             ]
         }
         params = {"key": self._api_key}
-        async with httpx.AsyncClient(timeout=self._timeout_s, verify=self._verify_ssl) as client:
+        async with create_safe_async_client(
+            verify=self._verify_ssl, timeout=self._timeout_s
+        ) as client:
             resp = await client.post(_GOOGLE_VISION_URL, json=body, params=params)
             resp.raise_for_status()
             payload: dict[str, Any] = resp.json()

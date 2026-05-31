@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
+from app.services.safe_http import create_safe_async_client
 
 from .base import EngineResult
 
@@ -73,7 +73,9 @@ class SelfPeerEngine:
             data["backend"] = self._backend
         if self._model:
             data["model"] = self._model
-        async with httpx.AsyncClient(timeout=self._timeout_s, verify=self._verify_ssl) as client:
+        async with create_safe_async_client(
+            verify=self._verify_ssl, timeout=self._timeout_s
+        ) as client:
             resp = await client.post(url, files=files, data=data)
             resp.raise_for_status()
             payload: dict[str, Any] = resp.json()
