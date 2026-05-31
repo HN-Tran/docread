@@ -173,6 +173,16 @@ OpenAI-kompatibles Beispiel (GLM-OCR per Docker: [`docs/llamacpp-docker-glm-ocr.
 | `AZURE_PRESET_LAYOUT_ENDPOINT` | *(leer)* | Optionales zweites Preset (Layout-Modell). |
 | `AZURE_PRESET_KEY` | *(leer)* | Serverseitiger Key, wenn die UI die Preset-URL ohne Key aufruft. |
 
+#### Ausgehende Requests & SSRF-Schutz
+
+Compare-/Peer-/`urlSource`-Funktionen rufen serverseitig vom Aufrufer übergebene URLs ab. Standardmäßig sind nur öffentliche Adressen erlaubt (interne/Loopback-Ziele werden blockiert). Vollständiges Modell: [`docs/security.md`](docs/security.md).
+
+| Variable | Standard | Beschreibung |
+|----------|----------|--------------|
+| `OUTBOUND_ALLOW_HOSTS` | *(leer)* | Kommagetrennte Hostnamen/CIDRs, die auch intern als Ziel erlaubt sind (z. B. `localhost,172.17.0.0/16`). |
+| `OUTBOUND_ALLOW_PRIVATE` | `false` | Erlaubt jede private/interne Adresse. Nur für vertrauenswürdige Einzelnutzer-/lokale Deployments. |
+| `OUTBOUND_MAX_RESPONSE_BYTES` | `67108864` | Obergrenze (Bytes) für eine serverseitig geladene Antwort; `0` deaktiviert. |
+
 #### Benchmark & MLflow
 
 | Variable | Standard | Beschreibung |
