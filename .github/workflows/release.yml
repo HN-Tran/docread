@@ -88,6 +88,53 @@ jobs:
       - name: Verify lockfile is in sync
         run: uv lock --check
 
+      - name: Generate release notes
+        id: notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG="v${VERSION}"
+          # Previous semver tag (newest excluding the current one), if any.
+          PREV_TAG=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname \
+            | grep -vx "${TAG}" | head -n1 || true)
+          if [[ -n "${PREV_TAG}" ]]; then
+            RANGE="${PREV_TAG}..${TAG}"
+            CHANGELOG_LINK="https://github.com/${REPO}/compare/${PREV_TAG}...${TAG}"
+          else
+            RANGE="${TAG}"
+            CHANGELOG_LINK="https://github.com/${REPO}/commits/${TAG}"
+          fi
+
+          notes_file="${RUNNER_TEMP}/release-notes.md"
+          : > "${notes_file}"
+
+          # Group Conventional Commit subjects under section headers.
+          emit() {
+            local header="$1" pattern="$2" body
+            body=$(git log --no-merges --pretty=format:'%h%x1f%s' "${RANGE}" \
+              | awk -F'\x1f' -v pat="${pattern}" '
+                  $2 ~ ("^(" pat ")(\\([^)]*\\))?!?:") {
+                    sub("^(" pat ")(\\([^)]*\\))?!?: *", "", $2)
+                    printf "- %s (%s)\n", $2, $1
+                  }')
+            [[ -n "${body}" ]] && printf "### %s\n%s\n\n" "${header}" "${body}" >> "${notes_file}"
+            return 0
+          }
+
+          emit "Features"      'feat'
+          emit "Bug Fixes"     'fix'
+          emit "Performance"   'perf'
+          emit "Refactoring"   'refactor'
+          emit "Documentation" 'docs'
+          emit "Build & CI"    'ci|build|chore'
+
+          printf '**Full Changelog**: %s\n' "${CHANGELOG_LINK}" >> "${notes_file}"
+          echo "file=${notes_file}" >> "$GITHUB_OUTPUT"
+          echo "----- release notes -----"
+          cat "${notes_file}"
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -99,4 +146,4 @@ jobs:
           fi
           gh release create "v${VERSION}" \
             --title "v${VERSION}" \
-            --generate-notes
+            --notes-file "${{ steps.notes.outputs.file }}"
