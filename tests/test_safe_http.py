@@ -9,7 +9,7 @@ schemes, and per-hop revalidation. Also covers the operator opt-in allow list.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Sequence
 from typing import Any, TypeVar
 
 import httpx
@@ -163,3 +163,71 @@ def test_redirect_hop_to_internal_is_revalidated(monkeypatch: pytest.MonkeyPatch
     redirected = httpx.Request("GET", "http://redir.test/internal")
     with pytest.raises(SSRFError):
         _run(transport.handle_async_request(redirected))
+
+
+class _FakeStream(httpx.AsyncByteStream):
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = chunks
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        for chunk in self._chunks:
+            yield chunk
+
+    async def aclose(self) -> None:
+        return None
+
+
+def test_blocks_oversized_response_via_content_length(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_resolve(monkeypatch, {"big.example.com": ["93.184.216.34"]})
+
+    async def fake_handle(self: httpx.AsyncHTTPTransport, request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"x" * 100)
+
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", fake_handle)
+
+    async def go() -> None:
+        async with create_safe_async_client(
+            allow_hosts=(), allow_private=False, max_response_bytes=10
+        ) as client:
+            await client.get("http://big.example.com/")
+
+    with pytest.raises(SSRFError):
+        _run(go())
+
+
+def test_blocks_oversized_streamed_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_resolve(monkeypatch, {"stream.example.com": ["93.184.216.34"]})
+
+    async def fake_handle(self: httpx.AsyncHTTPTransport, request: httpx.Request) -> httpx.Response:
+        # No content-length header -> the streamed byte cap must catch it.
+        return httpx.Response(200, stream=_FakeStream([b"x" * 8, b"x" * 8]))
+
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", fake_handle)
+
+    async def go() -> None:
+        async with create_safe_async_client(
+            allow_hosts=(), allow_private=False, max_response_bytes=10
+        ) as client:
+            await client.get("http://stream.example.com/")
+
+    with pytest.raises(SSRFError):
+        _run(go())
+
+
+def test_response_within_limit_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_resolve(monkeypatch, {"ok.example.com": ["93.184.216.34"]})
+
+    async def fake_handle(self: httpx.AsyncHTTPTransport, request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"small")
+
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", fake_handle)
+
+    async def go() -> httpx.Response:
+        async with create_safe_async_client(
+            allow_hosts=(), allow_private=False, max_response_bytes=1024
+        ) as client:
+            return await client.get("http://ok.example.com/")
+
+    resp = _run(go())
+    assert resp.status_code == 200
+    assert resp.content == b"small"

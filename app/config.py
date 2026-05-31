@@ -141,6 +141,7 @@ class Settings:
     verify_ssl: bool
     outbound_allow_hosts: tuple[str, ...]
     outbound_allow_private: bool
+    outbound_max_response_bytes: int
     deskew_enabled: bool
     deskew_page_cardinal: bool
     deskew_min_angle_deg: float
@@ -241,6 +242,9 @@ def get_settings() -> Settings:
         verify_ssl=_env_bool("VERIFY_SSL", False),
         outbound_allow_hosts=_parse_csv_tuple(os.getenv("OUTBOUND_ALLOW_HOSTS", "")),
         outbound_allow_private=_env_bool("OUTBOUND_ALLOW_PRIVATE", False),
+        outbound_max_response_bytes=max(
+            0, _env_int("OUTBOUND_MAX_RESPONSE_BYTES", 64 * 1024 * 1024)
+        ),
         deskew_enabled=_env_bool("DESKEW_ENABLED", True),
         deskew_page_cardinal=_env_bool("DESKEW_PAGE_CARDINAL", True),
         deskew_min_angle_deg=max(0.0, _env_float("DESKEW_MIN_ANGLE_DEG", 0.5)),

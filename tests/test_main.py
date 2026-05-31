@@ -55,6 +55,7 @@ def _settings(*, app_base_path: str = "") -> Settings:
         verify_ssl=False,
         outbound_allow_hosts=(),
         outbound_allow_private=False,
+        outbound_max_response_bytes=64 * 1024 * 1024,
         deskew_enabled=False,
         deskew_page_cardinal=False,
         deskew_min_angle_deg=0.5,

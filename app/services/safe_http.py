@@ -29,7 +29,8 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from typing import cast
 
 import httpx
 
@@ -84,6 +85,25 @@ def _is_blocked(ip: _IpAddress) -> bool:
     )
 
 
+class _LimitedAsyncStream(httpx.AsyncByteStream):
+    """Wrap a response stream and abort once it exceeds ``limit`` bytes."""
+
+    def __init__(self, stream: httpx.AsyncByteStream, limit: int) -> None:
+        self._stream = stream
+        self._limit = limit
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        total = 0
+        async for chunk in self._stream:
+            total += len(chunk)
+            if total > self._limit:
+                raise SSRFError(f"Outbound response exceeded the {self._limit}-byte limit.")
+            yield chunk
+
+    async def aclose(self) -> None:
+        await self._stream.aclose()
+
+
 async def _resolve(host: str, port: int) -> list[str]:
     """Resolve ``host`` to the set of distinct IP strings it maps to."""
     loop = asyncio.get_running_loop()
@@ -107,11 +127,13 @@ class SafeTransport(httpx.AsyncHTTPTransport):
         *,
         allow_hosts: Sequence[str] | None = None,
         allow_private: bool = False,
+        max_response_bytes: int | None = None,
         **kwargs: object,
     ) -> None:
         super().__init__(**kwargs)  # type: ignore[arg-type]
         self._allow_hostnames, self._allow_networks = _parse_allow(allow_hosts)
         self._allow_private = allow_private
+        self._max_response_bytes = max_response_bytes
 
     def _ip_allowed(self, ip: _IpAddress) -> bool:
         check = _unwrap(ip)
@@ -154,7 +176,20 @@ class SafeTransport(httpx.AsyncHTTPTransport):
         # hostname rather than the literal IP we connect to.
         request.url = url.copy_with(host=safe_ip)
         request.extensions = {**request.extensions, "sni_hostname": host}
-        return await super().handle_async_request(request)
+        response = await super().handle_async_request(request)
+        return self._limit_response(response)
+
+    def _limit_response(self, response: httpx.Response) -> httpx.Response:
+        if self._max_response_bytes is None or self._max_response_bytes <= 0:
+            return response
+        declared = response.headers.get("content-length")
+        if declared is not None and declared.isdigit() and int(declared) > self._max_response_bytes:
+            raise SSRFError(
+                f"Outbound response exceeded the {self._max_response_bytes}-byte limit."
+            )
+        stream = cast(httpx.AsyncByteStream, response.stream)
+        response.stream = _LimitedAsyncStream(stream, self._max_response_bytes)
+        return response
 
 
 def create_safe_async_client(
@@ -164,23 +199,27 @@ def create_safe_async_client(
     follow_redirects: bool = False,
     allow_hosts: Sequence[str] | None = None,
     allow_private: bool | None = None,
+    max_response_bytes: int | None = None,
 ) -> httpx.AsyncClient:
     """Return an ``httpx.AsyncClient`` that rejects SSRF targets.
 
-    ``allow_hosts`` / ``allow_private`` default to the values from
-    :func:`app.config.get_settings` when not provided, so callers normally do
-    not have to thread operator configuration through every engine.
+    ``allow_hosts`` / ``allow_private`` / ``max_response_bytes`` default to the
+    values from :func:`app.config.get_settings` when not provided, so callers
+    normally do not have to thread operator configuration through every engine.
     """
-    if allow_hosts is None or allow_private is None:
+    if allow_hosts is None or allow_private is None or max_response_bytes is None:
         settings = get_settings()
         if allow_hosts is None:
             allow_hosts = settings.outbound_allow_hosts
         if allow_private is None:
             allow_private = settings.outbound_allow_private
+        if max_response_bytes is None:
+            max_response_bytes = settings.outbound_max_response_bytes
     transport = SafeTransport(
         verify=verify,
         allow_hosts=allow_hosts,
         allow_private=allow_private,
+        max_response_bytes=max_response_bytes,
     )
     return httpx.AsyncClient(
         timeout=timeout,
