@@ -63,6 +63,7 @@ from app.services.inference import InferenceError, VisionLlmClient
 from app.services.inference.registry import VisionClientRegistry
 from app.services.mlflow_sink import MlflowSink
 from app.services.ocr_pipeline import OCRResult
+from app.services.safe_http import create_safe_async_client
 from app.services.warmed_example_store import WarmedExample, WarmedExampleStore
 
 router = APIRouter(prefix="/api")
@@ -1360,7 +1361,9 @@ async def _resolve_compat_request_input(request: Request) -> tuple[bytes, str]:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="application/json erfordert das Feld 'urlSource'.",
             )
-        async with httpx.AsyncClient(timeout=settings.request_timeout_s) as client:
+        async with create_safe_async_client(
+            verify=settings.verify_ssl, timeout=settings.request_timeout_s
+        ) as client:
             try:
                 response = await client.get(url_source.strip())
                 response.raise_for_status()
@@ -1665,7 +1668,7 @@ async def peer_models(url: str, vision_only: bool = True) -> dict[str, object]:
     settings = get_settings()
     params = {"vision_only": "true" if vision_only else "false"}
     try:
-        async with httpx.AsyncClient(timeout=10.0, verify=settings.verify_ssl) as client:
+        async with create_safe_async_client(verify=settings.verify_ssl, timeout=10.0) as client:
             resp = await client.get(f"{target}/api/models", params=params)
             resp.raise_for_status()
             payload = resp.json()

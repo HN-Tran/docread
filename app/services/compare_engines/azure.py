@@ -6,7 +6,7 @@ import asyncio
 import time
 from typing import Any
 
-import httpx
+from app.services.safe_http import create_safe_async_client
 
 from .base import EngineResult
 
@@ -84,7 +84,9 @@ class AzureEngine:
             "Ocp-Apim-Subscription-Key": self._key,
             "Content-Type": content_type or "application/octet-stream",
         }
-        async with httpx.AsyncClient(timeout=self._timeout_s, verify=self._verify_ssl) as client:
+        async with create_safe_async_client(
+            verify=self._verify_ssl, timeout=self._timeout_s
+        ) as client:
             if self._full_analyze_url:
                 resp = await client.post(
                     self._full_analyze_url, content=image_bytes, headers=headers

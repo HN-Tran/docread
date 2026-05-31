@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
+from app.services.safe_http import create_safe_async_client
 
 from .base import EngineResult
 
@@ -47,7 +47,9 @@ class PlainTextEngine:
         if self._auth_header_name and self._auth_header_value:
             headers[self._auth_header_name] = self._auth_header_value
 
-        async with httpx.AsyncClient(timeout=self._timeout_s, verify=self._verify_ssl) as client:
+        async with create_safe_async_client(
+            verify=self._verify_ssl, timeout=self._timeout_s
+        ) as client:
             resp = await client.request(
                 self._method, self._url, content=image_bytes, headers=headers
             )
