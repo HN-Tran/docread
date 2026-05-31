@@ -10,6 +10,7 @@ from fastapi import HTTPException, UploadFile
 from starlette.requests import Request
 from starlette.routing import Route
 
+from app.api import routes as api_routes
 from app.api.routes import ocr, router, schemas
 from app.services.backend_router import OCRBackendRouter
 
@@ -23,16 +24,40 @@ def _png_bytes() -> bytes:
 
 
 class FakeUploadFile:
-    def __init__(self, *, content: bytes, content_type: str) -> None:
+    def __init__(self, *, content: bytes, content_type: str, filename: str = "upload.bin") -> None:
         self._content = content
         self.content_type = content_type
+        self.filename = filename
 
     async def read(self) -> bytes:
         return self._content
 
 
-def _upload_file(*, content: bytes, content_type: str) -> UploadFile:
-    return cast(UploadFile, FakeUploadFile(content=content, content_type=content_type))
+def _upload_file(*, content: bytes, content_type: str, filename: str = "upload.bin") -> UploadFile:
+    return cast(
+        UploadFile,
+        FakeUploadFile(content=content, content_type=content_type, filename=filename),
+    )
+
+
+def _ooxml_word_bytes() -> bytes:
+    return b"PK\x03\x04" + b"\x00" * 50 + b"word/document.xml"
+
+
+def _ooxml_pptx_bytes() -> bytes:
+    return b"PK\x03\x04" + b"\x00" * 50 + b"ppt/presentation.xml"
+
+
+@pytest.fixture
+def mock_office_convert(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+    captured: dict[str, str] = {}
+
+    def fake_convert(data: bytes, suffix: str = ".docx") -> bytes:
+        captured["suffix"] = suffix
+        return b"%PDF-1.4\n%%EOF"
+
+    monkeypatch.setattr(api_routes, "_convert_office_to_pdf", fake_convert)
+    return captured
 
 
 class FakeRequest:
@@ -411,6 +436,126 @@ def test_ocr_accepts_pdf_content_type() -> None:
         )
     )
     assert response["text"] == "hello world"
+    assert fake_pipeline.last_call["content_type"] == "application/pdf"
+
+
+def test_resolve_office_suffix_prefers_filename() -> None:
+    assert (
+        api_routes._resolve_office_suffix(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.template",
+            "letter.dotx",
+        )
+        == ".dotx"
+    )
+    assert (
+        api_routes._resolve_office_suffix(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "slides.pptx",
+        )
+        == ".pptx"
+    )
+
+
+def test_ocr_accepts_dotx_template_mime(
+    mock_office_convert: dict[str, str],
+) -> None:
+    fake_pipeline = FakeBackendRouter()
+    asyncio.run(
+        ocr(
+            request=_request(),
+            file=_upload_file(
+                content=_ooxml_word_bytes(),
+                content_type=(
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.template"
+                ),
+                filename="letter.dotx",
+            ),
+            mode="plain",
+            schema_name=None,
+            model=None,
+            task=None,
+            custom_prompt=None,
+            token_limit=None,
+            pipeline=cast(OCRBackendRouter, fake_pipeline),
+        )
+    )
+    assert mock_office_convert["suffix"] == ".dotx"
+    assert fake_pipeline.last_call["content_type"] == "application/pdf"
+
+
+def test_ocr_accepts_dot_with_msword_mime(
+    mock_office_convert: dict[str, str],
+) -> None:
+    fake_pipeline = FakeBackendRouter()
+    asyncio.run(
+        ocr(
+            request=_request(),
+            file=_upload_file(
+                content=b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 32,
+                content_type="application/msword",
+                filename="template.dot",
+            ),
+            mode="plain",
+            schema_name=None,
+            model=None,
+            task=None,
+            custom_prompt=None,
+            token_limit=None,
+            pipeline=cast(OCRBackendRouter, fake_pipeline),
+        )
+    )
+    assert mock_office_convert["suffix"] == ".dot"
+    assert fake_pipeline.last_call["content_type"] == "application/pdf"
+
+
+def test_ocr_accepts_dotx_via_octet_stream_sniff(
+    mock_office_convert: dict[str, str],
+) -> None:
+    fake_pipeline = FakeBackendRouter()
+    asyncio.run(
+        ocr(
+            request=_request(
+                body=_ooxml_word_bytes(),
+                content_type="application/octet-stream",
+            ),
+            file=None,
+            mode="plain",
+            schema_name=None,
+            model=None,
+            task=None,
+            custom_prompt=None,
+            token_limit=None,
+            pipeline=cast(OCRBackendRouter, fake_pipeline),
+        )
+    )
+    assert mock_office_convert["suffix"] == ".docx"
+    assert fake_pipeline.last_call["content_type"] == "application/pdf"
+
+
+def test_ocr_accepts_pptx_mime(
+    mock_office_convert: dict[str, str],
+) -> None:
+    fake_pipeline = FakeBackendRouter()
+    asyncio.run(
+        ocr(
+            request=_request(),
+            file=_upload_file(
+                content=_ooxml_pptx_bytes(),
+                content_type=(
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                ),
+                filename="deck.pptx",
+            ),
+            mode="plain",
+            schema_name=None,
+            model=None,
+            task=None,
+            custom_prompt=None,
+            token_limit=None,
+            pipeline=cast(OCRBackendRouter, fake_pipeline),
+        )
+    )
+    assert mock_office_convert["suffix"] == ".pptx"
     assert fake_pipeline.last_call["content_type"] == "application/pdf"
 
 

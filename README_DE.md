@@ -16,13 +16,13 @@
 <p align="center"><strong>Selbst gehostete Dokument-OCR mit Vision-Sprachmodellen</strong></p>
 
 <p align="center">
-  Bilder, Scans, PDFs und Word-Dokumente auf eigener Infrastruktur auswerten — mit Browser-UI,
+  Bilder, Scans, PDFs und Office-Dokumente auf eigener Infrastruktur auswerten — mit Browser-UI,
   produktionsreifer REST-API und Drop-in-Kompatibilität zu Azure Document Intelligence.
 </p>
 
 ## Warum docread?
 
-Die meisten OCR-Lösungen zwingen zu Kompromissen: Cloud-API (Kosten pro Seite, Daten verlassen das Netz) oder zusammengeklebte Open-Source-Tools, die bei schiefen Kamerafotos, Tabellenrastern und mehrseitigen Dateien scheitern. **docread ist eine selbst gehostete Anwendung**, die Bilder (PNG, JPEG, WEBP, GIF, TIFF), mehrseitige PDFs und Word-Dokumente (DOC/DOCX) liest, moderne Vision-LLMs lokal ausführt, unordentliche Scans vor der OCR begradigt und trotzdem die APIs spricht, die bestehende Tools bereits erwarten.
+Die meisten OCR-Lösungen zwingen zu Kompromissen: Cloud-API (Kosten pro Seite, Daten verlassen das Netz) oder zusammengeklebte Open-Source-Tools, die bei schiefen Kamerafotos, Tabellenrastern und mehrseitigen Dateien scheitern. **docread ist eine selbst gehostete Anwendung**, die Bilder (PNG, JPEG, WEBP, GIF, TIFF), mehrseitige PDFs, Word-Dokumente und -Vorlagen (DOC, DOCX, DOT, DOTX, DOCM, DOTM) sowie PowerPoint-Folien (PPT, PPTX) liest, moderne Vision-LLMs lokal ausführt, unordentliche Scans vor der OCR begradigt und trotzdem die APIs spricht, die bestehende Tools bereits erwarten.
 
 ## Auf einen Blick
 
@@ -251,7 +251,7 @@ Kompatibilitäts-Hinweise:
 
 Pflicht: Datei-Bytes — Multipart-Feld `file` oder roher Body `application/octet-stream`. Bei `mode=structured` zusätzlich `schema_name`. Alle übrigen Felder (`backend`, `model`, `task`, `expert_*`, …) sind optionale Overrides; die vollständige Liste steht in der OpenAPI.
 
-Raw-Upload: dieselben optionalen Parameter als Query-Strings. Formaterkennung per Signatur (`png`, `jpeg`, `webp`, `gif`, `tiff`, `pdf`, `doc`, `docx`); Word wird via LibreOffice nach PDF konvertiert.
+Raw-Upload: dieselben optionalen Parameter als Query-Strings. Formaterkennung per Signatur (`png`, `jpeg`, `webp`, `gif`, `tiff`, `pdf`, `doc`, `docx`, `dot`, `dotx`, `ppt`, `pptx`, …); Office-Formate werden via LibreOffice nach PDF konvertiert.
 
 ```powershell
 Invoke-RestMethod -Method POST `

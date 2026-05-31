@@ -72,6 +72,47 @@ STRING_INDEX_TYPE = "textElements"
 AZURE_API_VERSION = "2022-08-31"
 AZURE_MODEL_ID = "prebuilt-read"
 SUPPORTED_STRING_INDEX_TYPES = {"textElements", "unicodeCodePoint", "utf16CodeUnit"}
+_WORD_FAMILY_MIMES = {
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.template",
+    "application/vnd.ms-word.document.macroEnabled.12",
+    "application/vnd.ms-word.template.macroEnabled.12",
+}
+_POWERPOINT_FAMILY_MIMES = {
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.openxmlformats-officedocument.presentationml.template",
+    "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
+    "application/vnd.ms-powerpoint.template.macroEnabled.12",
+}
+_OFFICE_CONVERTIBLE_MIMES = _WORD_FAMILY_MIMES | _POWERPOINT_FAMILY_MIMES
+_OFFICE_SUFFIX_BY_EXT = {
+    ".doc": ".doc",
+    ".dot": ".dot",
+    ".docx": ".docx",
+    ".dotx": ".dotx",
+    ".docm": ".docm",
+    ".dotm": ".dotm",
+    ".ppt": ".ppt",
+    ".pot": ".pot",
+    ".pptx": ".pptx",
+    ".potx": ".potx",
+    ".pptm": ".pptm",
+    ".potm": ".potm",
+}
+_OFFICE_SUFFIX_BY_MIME = {
+    "application/msword": ".doc",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.template": ".dotx",
+    "application/vnd.ms-word.document.macroEnabled.12": ".docm",
+    "application/vnd.ms-word.template.macroEnabled.12": ".dotm",
+    "application/vnd.ms-powerpoint": ".ppt",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "application/vnd.openxmlformats-officedocument.presentationml.template": ".potx",
+    "application/vnd.ms-powerpoint.presentation.macroEnabled.12": ".pptm",
+    "application/vnd.ms-powerpoint.template.macroEnabled.12": ".potm",
+}
 ALLOWED_MIME_TYPES = {
     "image/png",
     "image/jpeg",
@@ -81,12 +122,7 @@ ALLOWED_MIME_TYPES = {
     "image/tiff",
     "image/x-tiff",
     "application/pdf",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-}
-_WORD_DOCUMENT_TYPES = {
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    *_OFFICE_CONVERTIBLE_MIMES,
 }
 _WORD_RE = re.compile(r"\S+")
 logger = logging.getLogger(__name__)
@@ -103,7 +139,7 @@ def _normalize_content_type(content_type: str | None) -> str | None:
     return normalized or None
 
 
-def _sniff_content_type(payload: bytes) -> str | None:
+def _sniff_content_type(payload: bytes, *, filename: str | None = None) -> str | None:
     if payload.startswith(b"\x89PNG\r\n\x1a\n"):
         return "image/png"
     if payload.startswith(b"\xff\xd8\xff"):
@@ -116,21 +152,29 @@ def _sniff_content_type(payload: bytes) -> str | None:
         return "application/pdf"
     if len(payload) >= 12 and payload[:4] == b"RIFF" and payload[8:12] == b"WEBP":
         return "image/webp"
-    # OLE2 Compound Document (legacy .doc)
+    if payload.startswith(b"PK\x03\x04"):
+        head = payload[:2000]
+        if b"ppt/" in head:
+            return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        if b"word/" in head:
+            return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    # OLE2 Compound Document (legacy Word/PowerPoint — disambiguate via filename)
     if payload.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+        ext = Path(filename or "").suffix.lower()
+        if ext in {".ppt", ".pot", ".pps"}:
+            return "application/vnd.ms-powerpoint"
         return "application/msword"
-    # ZIP-based Office Open XML (.docx) — check for word/ entry
-    if payload.startswith(b"PK\x03\x04") and b"word/" in payload[:2000]:
-        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     return None
 
 
-def _resolve_effective_content_type(content_type: str | None, payload: bytes) -> str:
+def _resolve_effective_content_type(
+    content_type: str | None, payload: bytes, *, filename: str | None = None
+) -> str:
     normalized = _normalize_content_type(content_type)
     if normalized is not None and normalized in ALLOWED_MIME_TYPES:
         return normalized
     if normalized in {None, "application/octet-stream"}:
-        sniffed = _sniff_content_type(payload)
+        sniffed = _sniff_content_type(payload, filename=filename)
         if sniffed is not None:
             return sniffed
         raise HTTPException(
@@ -201,7 +245,7 @@ def _expand_zip(zip_bytes: bytes) -> list[tuple[str, bytes, str, str]]:
                 content = zf.read(name)
             except Exception:
                 continue
-            ctype = _sniff_content_type(content)
+            ctype = _sniff_content_type(content, filename=name)
             if ctype is None or ctype not in ALLOWED_MIME_TYPES:
                 continue
             stem_path = str(Path(name).with_suffix(".txt"))
@@ -211,8 +255,17 @@ def _expand_zip(zip_bytes: bytes) -> list[tuple[str, bytes, str, str]]:
     return results
 
 
-def _convert_word_to_pdf(doc_bytes: bytes, suffix: str = ".docx") -> bytes:
-    """Convert a DOC/DOCX file to PDF via LibreOffice headless.
+def _resolve_office_suffix(content_type: str, filename: str | None = None) -> str | None:
+    if content_type not in _OFFICE_CONVERTIBLE_MIMES:
+        return None
+    ext = Path(filename or "").suffix.lower()
+    if ext in _OFFICE_SUFFIX_BY_EXT:
+        return _OFFICE_SUFFIX_BY_EXT[ext]
+    return _OFFICE_SUFFIX_BY_MIME.get(content_type)
+
+
+def _convert_office_to_pdf(doc_bytes: bytes, suffix: str = ".docx") -> bytes:
+    """Convert a LibreOffice-supported Office file to PDF via headless export.
 
     The ``-env:UserInstallation`` flag pins LibreOffice's user profile to a
     writable tmp dir. Without it, LibreOffice tries ``$HOME`` which can be
@@ -250,12 +303,14 @@ def _convert_word_to_pdf(doc_bytes: bytes, suffix: str = ".docx") -> bytes:
         return pdf_path.read_bytes()
 
 
-async def _maybe_convert_word(image_bytes: bytes, content_type: str) -> tuple[bytes, str]:
-    """If content_type is DOC/DOCX, convert to PDF. Otherwise pass through."""
-    if content_type not in _WORD_DOCUMENT_TYPES:
+async def _maybe_convert_office(
+    image_bytes: bytes, content_type: str, *, filename: str | None = None
+) -> tuple[bytes, str]:
+    """If content_type is a supported Office format, convert to PDF. Otherwise pass through."""
+    suffix = _resolve_office_suffix(content_type, filename)
+    if suffix is None:
         return image_bytes, content_type
-    suffix = ".doc" if content_type == "application/msword" else ".docx"
-    pdf_bytes = await asyncio.to_thread(_convert_word_to_pdf, image_bytes, suffix)
+    pdf_bytes = await asyncio.to_thread(_convert_office_to_pdf, image_bytes, suffix)
     return pdf_bytes, "application/pdf"
 
 
@@ -1323,7 +1378,7 @@ async def _resolve_compat_request_input(request: Request) -> tuple[bytes, str]:
         content_type = _resolve_effective_content_type(
             request.headers.get("content-type"), image_bytes
         )
-    image_bytes, content_type = await _maybe_convert_word(image_bytes, content_type)
+    image_bytes, content_type = await _maybe_convert_office(image_bytes, content_type)
 
     if not image_bytes:
         raise HTTPException(
@@ -1764,12 +1819,14 @@ async def benchmark_create(
         if _is_zip(content, upload.content_type):
             expanded = await asyncio.to_thread(_expand_zip, content)
             for name, file_bytes, ctype, ref in expanded:
-                file_bytes, ctype = await _maybe_convert_word(file_bytes, ctype)
+                file_bytes, ctype = await _maybe_convert_office(file_bytes, ctype, filename=name)
                 file_payloads.append((name, file_bytes, ctype))
                 final_references.append(ref)
         else:
-            ctype = _resolve_effective_content_type(upload.content_type, content)
-            content, ctype = await _maybe_convert_word(content, ctype)
+            ctype = _resolve_effective_content_type(
+                upload.content_type, content, filename=upload.filename
+            )
+            content, ctype = await _maybe_convert_office(content, ctype, filename=upload.filename)
             file_payloads.append((upload.filename or "datei", content, ctype))
             form_ref = references[form_ref_idx] if form_ref_idx < len(references) else ""
             form_ref_idx += 1
@@ -2097,13 +2154,17 @@ async def ocr(
 
     if file is not None:
         image_bytes = await file.read()
-        content_type = _resolve_effective_content_type(file.content_type, image_bytes)
+        content_type = _resolve_effective_content_type(
+            file.content_type, image_bytes, filename=file.filename
+        )
     else:
         image_bytes = await request.body()
         content_type = _resolve_effective_content_type(
             request.headers.get("content-type"), image_bytes
         )
-    image_bytes, content_type = await _maybe_convert_word(image_bytes, content_type)
+    image_bytes, content_type = await _maybe_convert_office(
+        image_bytes, content_type, filename=file.filename if file is not None else None
+    )
 
     if not image_bytes:
         raise HTTPException(
@@ -2352,8 +2413,10 @@ async def warm_example(
     can decide whether to retry or just log and skip.
     """
     image_bytes = file_path.read_bytes()
-    content_type = _resolve_effective_content_type(None, image_bytes)
-    image_bytes, content_type = await _maybe_convert_word(image_bytes, content_type)
+    content_type = _resolve_effective_content_type(None, image_bytes, filename=file_path.name)
+    image_bytes, content_type = await _maybe_convert_office(
+        image_bytes, content_type, filename=file_path.name
+    )
 
     started_at = datetime.now(timezone.utc)
     result, selected_backend = await pipeline.run(
@@ -2727,13 +2790,17 @@ async def compare_with_engine(
 
     if file is not None:
         image_bytes = await file.read()
-        content_type = _resolve_effective_content_type(file.content_type, image_bytes)
+        content_type = _resolve_effective_content_type(
+            file.content_type, image_bytes, filename=file.filename
+        )
     else:
         image_bytes = await request.body()
         content_type = _resolve_effective_content_type(
             request.headers.get("content-type"), image_bytes
         )
-    image_bytes, content_type = await _maybe_convert_word(image_bytes, content_type)
+    image_bytes, content_type = await _maybe_convert_office(
+        image_bytes, content_type, filename=file.filename if file is not None else None
+    )
 
     if not image_bytes:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Datei ist leer.")

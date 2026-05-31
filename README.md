@@ -16,13 +16,13 @@
 <p align="center"><strong>Self-hosted document OCR with vision language models</strong></p>
 
 <p align="center">
-  Turn images, scans, PDFs, and Word documents into text on infrastructure you control — with a browser UI,
+  Turn images, scans, PDFs, and Office documents into text on infrastructure you control — with a browser UI,
   a production REST API, and drop-in compatibility with Azure Document Intelligence.
 </p>
 
 ## Why docread?
 
-Most OCR setups force a trade-off: send documents to a cloud API (per-page cost, data leaves your network), or stitch together open-source tools that struggle with crooked camera shots, table grids, and multi-page files. **docread is one self-hosted app** that reads images (PNG, JPEG, WEBP, GIF, TIFF), multi-page PDFs, and Word documents (DOC/DOCX), runs modern vision LLMs locally, straightens messy scans before OCR, and still speaks the APIs your existing tools already expect.
+Most OCR setups force a trade-off: send documents to a cloud API (per-page cost, data leaves your network), or stitch together open-source tools that struggle with crooked camera shots, table grids, and multi-page files. **docread is one self-hosted app** that reads images (PNG, JPEG, WEBP, GIF, TIFF), multi-page PDFs, Word documents and templates (DOC, DOCX, DOT, DOTX, DOCM, DOTM), and PowerPoint slides (PPT, PPTX), runs modern vision LLMs locally, straightens messy scans before OCR, and still speaks the APIs your existing tools already expect.
 
 ## At a glance
 
@@ -250,7 +250,7 @@ Compatibility notes:
 
 Required: upload bytes — multipart field `file`, or raw `application/octet-stream` body. When `mode=structured`, `schema_name` is required too. All other fields (`backend`, `model`, `task`, `expert_*`, …) are optional overrides; see OpenAPI for the full list.
 
-Raw upload: pass the same optional parameters as query strings. Format detection uses the file signature (`png`, `jpeg`, `webp`, `gif`, `tiff`, `pdf`, `doc`, `docx`); Word is converted to PDF via LibreOffice.
+Raw upload: pass the same optional parameters as query strings. Format detection uses the file signature (`png`, `jpeg`, `webp`, `gif`, `tiff`, `pdf`, `doc`, `docx`, `dot`, `dotx`, `ppt`, `pptx`, …); Office formats are converted to PDF via LibreOffice.
 
 ```powershell
 Invoke-RestMethod -Method POST `

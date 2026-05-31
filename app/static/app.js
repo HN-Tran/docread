@@ -150,6 +150,30 @@ const TIFF_IMAGE_TYPES = new Set(["image/tif", "image/tiff", "image/x-tiff"]);
 const WORD_DOCUMENT_TYPES = new Set([
   "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.template",
+  "application/vnd.ms-word.document.macroEnabled.12",
+  "application/vnd.ms-word.template.macroEnabled.12",
+]);
+const POWERPOINT_DOCUMENT_TYPES = new Set([
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.openxmlformats-officedocument.presentationml.template",
+  "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
+  "application/vnd.ms-powerpoint.template.macroEnabled.12",
+]);
+const OFFICE_DOCUMENT_EXTENSIONS = new Set([
+  ".doc",
+  ".dot",
+  ".docx",
+  ".dotx",
+  ".docm",
+  ".dotm",
+  ".ppt",
+  ".pot",
+  ".pptx",
+  ".potx",
+  ".pptm",
+  ".potm",
 ]);
 const LAYOUT_REGION_KIND_ALIASES = new Map([
   ["text", "text"],
@@ -420,8 +444,12 @@ function updatePreview() {
     return;
   }
 
-  if (WORD_DOCUMENT_TYPES.has(file.type) || fileExtension(file.name) === ".doc" || fileExtension(file.name) === ".docx") {
-    previewEmptyEl.textContent = tr("preview_word_pending");
+  if (
+    WORD_DOCUMENT_TYPES.has(file.type) ||
+    POWERPOINT_DOCUMENT_TYPES.has(file.type) ||
+    OFFICE_DOCUMENT_EXTENSIONS.has(fileExtension(file.name))
+  ) {
+    previewEmptyEl.textContent = tr("preview_office_pending");
     previewEmptyEl.classList.remove("hidden");
     return;
   }
