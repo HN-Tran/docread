@@ -97,7 +97,7 @@ class BenchmarkJobStore:
     async def create(self, options: dict[str, Any], total: int) -> BenchmarkJob:
         async with self._lock:
             job = BenchmarkJob(
-                id=uuid4().hex[:12],
+                id=uuid4().hex,
                 created_at=datetime.now(timezone.utc),
                 status="queued",
                 progress_done=0,
