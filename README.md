@@ -16,13 +16,13 @@
 <p align="center"><strong>Self-hosted document OCR with vision language models</strong></p>
 
 <p align="center">
-  Turn scans, photos, and PDFs into text on infrastructure you control — with a browser UI,
+  Turn images, scans, PDFs, and Word documents into text on infrastructure you control — with a browser UI,
   a production REST API, and drop-in compatibility with Azure Document Intelligence.
 </p>
 
 ## Why docread?
 
-Most OCR setups force a trade-off: send documents to a cloud API (per-page cost, data leaves your network), or stitch together open-source tools that struggle with crooked camera shots, table grids, and multi-page PDFs. **docread is one self-hosted app** that runs modern vision LLMs locally, straightens messy scans before OCR, and still speaks the APIs your existing tools already expect.
+Most OCR setups force a trade-off: send documents to a cloud API (per-page cost, data leaves your network), or stitch together open-source tools that struggle with crooked camera shots, table grids, and multi-page files. **docread is one self-hosted app** that reads images (PNG, JPEG, WEBP, GIF, TIFF), multi-page PDFs, and Word documents (DOC/DOCX), runs modern vision LLMs locally, straightens messy scans before OCR, and still speaks the APIs your existing tools already expect.
 
 ## At a glance
 
