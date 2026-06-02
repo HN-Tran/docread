@@ -674,6 +674,8 @@ def _skip_landscape_flip_after_cardinal(
     """OSD and quarter-turn picks already encode upright; extra 180° flips mis-rotate."""
     if deskew_context == "region":
         return True
+    if cardinal_ccw == 0 and not _heuristic_180_enabled():
+        return True
     if cardinal_branch in {
         "tesseract_osd",
         "page_cardinal_disabled",
@@ -724,7 +726,12 @@ def _deskew_from_cardinal(
     elif _skip_landscape_flip_after_cardinal(
         cardinal_ccw, cardinal_branch=cardinal_branch, deskew_context=deskew_context
     ):
-        reason = "region_after_page" if deskew_context == "region" else "authoritative_cardinal"
+        if deskew_context == "region":
+            reason = "region_after_page"
+        elif cardinal_ccw == 0 and not _heuristic_180_enabled():
+            reason = "heuristic_180_disabled"
+        else:
+            reason = "authoritative_cardinal"
         _deskew_debug(
             "landscape_flip_skip",
             reason=reason,
@@ -808,6 +815,16 @@ def _quarter_turn_env_override() -> int | None:
     return None
 
 
+def _heuristic_180_enabled() -> bool:
+    """Allow non-OSD 180° flips. Disabled by default to avoid false positives."""
+    return os.getenv("DESKEW_HEURISTIC_180", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def _pick_cardinal_orientation(
     img: Image.Image, *, min_angle_deg: float = 0.5, deskew_context: str = "page"
 ) -> tuple[int, str, float]:
@@ -845,9 +862,7 @@ def _pick_cardinal_on_probe(
     tile_img = full_img if full_img is not None else probe
     skew_hint = _orientation_skew_hint_degrees(probe)
     _deskew_debug("skew_hint", degrees=round(skew_hint, 2))
-    if _near_perpendicular_conflicts_with_tiles(
-        tile_img, skew_hint, min_angle_deg=min_angle_deg
-    ):
+    if _near_perpendicular_conflicts_with_tiles(tile_img, skew_hint, min_angle_deg=min_angle_deg):
         _deskew_debug(
             "skew_hint",
             reason="near_perpendicular_spurious",
@@ -940,6 +955,14 @@ def _pick_cardinal_on_probe(
         )
         _deskew_debug("pick_result", branch="sideways", cardinal_ccw=picked)
         return picked, "sideways", skew_hint
+
+    if not _heuristic_180_enabled():
+        _deskew_debug(
+            "pick_result",
+            branch="upright_no_heuristic_180",
+            cardinal_ccw=0,
+        )
+        return 0, "upright_no_heuristic_180", skew_hint
 
     candidates: tuple[int, ...] = (0, 180) if deskew_context != "region" else (0,)
     best_rot = 0
@@ -1102,9 +1125,12 @@ def _preview_cardinal_tilt(img: Image.Image) -> int:
     if osd_ccw is not None:
         return osd_ccw
 
-    card, conf = detect_cardinal_rotation(img)
+    card, conf = detect_cardinal_rotation(img, allow_180=_heuristic_180_enabled())
     if card != 0 and conf >= 0.05:
         return card
+
+    if not _heuristic_180_enabled():
+        return 0
 
     gray = _to_gray(img)
     vc0 = _text_vertical_center(gray)
@@ -1228,7 +1254,7 @@ def pick_cardinal_ccw(img: Image.Image, *, min_angle_deg: float = 0.5) -> int:
     return cardinal_ccw
 
 
-def detect_cardinal_rotation(img: Image.Image) -> tuple[int, float]:
+def detect_cardinal_rotation(img: Image.Image, *, allow_180: bool = True) -> tuple[int, float]:
     """Fast cardinal detector for per-region crops (0/90/180/270 CCW)."""
     gray = _to_gray(img)
     variances = _cardinal_variances(gray)
@@ -1236,6 +1262,8 @@ def detect_cardinal_rotation(img: Image.Image) -> tuple[int, float]:
     score_90_270 = max(variances[1], variances[3])
 
     if score_0_180 >= score_90_270:
+        if not allow_180:
+            return 0, 0.0
         vc0 = _text_vertical_center(gray)
         vc2 = _text_vertical_center(np.rot90(gray, k=2))
         if vc0 is not None and vc2 is not None:

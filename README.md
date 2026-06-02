@@ -149,6 +149,7 @@ OpenAI-compatible example (GLM-OCR via Docker: [`docs/llamacpp-docker-glm-ocr.md
 | `DESKEW_PAGE_CARDINAL` | `true` | Quarter-turn detection on content-bbox probe (margin scans). |
 | `DESKEW_OSD` | `1` | Tesseract OSD on probe (needs `pytesseract`; in Docker image). |
 | `DESKEW_OSD_MIN_CONFIDENCE` | `1.0` | Minimum OSD confidence to apply a cardinal hint. |
+| `DESKEW_HEURISTIC_180` | `0` | Enable non-OSD 180° flips; off by default to avoid false positives on valid upright pages/crops. |
 | `DESKEW_TESSERACT_FINE` | `1` | Fine skew via Tesseract PSM 2 deskew (paperless-ngx / OCRmyPDF). |
 | `DESKEW_TESSERACT_LANG` | `osd` | Tesseract `-l` for deskew (`osd`, `eng+deu`, etc.). |
 | `DESKEW_TESSERACT_TIMEOUT` | `60` | Seconds before giving up on Tesseract deskew. |

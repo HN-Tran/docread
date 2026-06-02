@@ -210,9 +210,7 @@ def test_diamond_zone_near_horizontal_returns_without_sideways(
     monkeypatch.setenv("DESKEW_DEBUG", "1")
     probe = Image.new("RGB", (284, 304), "white")
     monkeypatch.setattr("app.services.deskew._tesseract_deskew_degrees", lambda _img: None)
-    monkeypatch.setattr(
-        "app.services.deskew.detect_page_angle", lambda _img, **kwargs: -49.0
-    )
+    monkeypatch.setattr("app.services.deskew.detect_page_angle", lambda _img, **kwargs: -49.0)
     monkeypatch.setattr(
         "app.services.deskew._diamond_zone_skew_conflicts_with_tiles",
         lambda _probe, _hint, **kwargs: True,
@@ -244,9 +242,7 @@ def test_small_island_upright_skips_sideways_on_tiny_content_bbox(
     monkeypatch.setenv("DESKEW_DEBUG", "1")
     probe = Image.new("RGB", (284, 304), "white")
     monkeypatch.setattr("app.services.deskew._tesseract_deskew_degrees", lambda _img: None)
-    monkeypatch.setattr(
-        "app.services.deskew.detect_page_angle", lambda _img, **kwargs: -49.0
-    )
+    monkeypatch.setattr("app.services.deskew.detect_page_angle", lambda _img, **kwargs: -49.0)
     monkeypatch.setattr(
         "app.services.deskew._diamond_zone_skew_conflicts_with_tiles",
         lambda _probe, _hint, **kwargs: False,
@@ -358,8 +354,13 @@ def test_reconcile_preview_tilt_uses_cardinal_correction() -> None:
     assert reconcile_preview_tilt(4.0, correction_ccw=0.0) == 4.0
 
 
-def test_detect_preview_tilt_upside_down_includes_cardinal_and_fine() -> None:
+def test_detect_preview_tilt_upside_down_includes_cardinal_and_fine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from app.services.deskew import detect_preview_tilt
+
+    monkeypatch.setattr("app.services.deskew._osd_cardinal_ccw", lambda *_a, **_k: 180)
+    monkeypatch.setattr("app.services.deskew._tesseract_deskew_degrees", lambda *_a: 0.0)
 
     doc = Image.new("RGB", (700, 1000), "white")
     draw = ImageDraw.Draw(doc)
@@ -474,8 +475,14 @@ def test_sideways_scan_quarter_turn_matches_orientation() -> None:
     assert net_270 == 90.0, net_270
 
 
-def test_large_upside_down_scan_gets_180_flip() -> None:
-    """Regression: landscape flip must not depend on a tight vcenter threshold."""
+def test_heuristic_180_can_be_enabled_for_upside_down_without_osd(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Legacy non-OSD 180° correction is opt-in because it can false-positive."""
+    monkeypatch.setenv("DESKEW_HEURISTIC_180", "1")
+    monkeypatch.setattr("app.services.deskew._osd_cardinal_ccw", lambda *_a, **_k: None)
+    monkeypatch.setattr("app.services.deskew._tesseract_deskew_degrees", lambda *_a: 0.0)
+
     base = Image.new("RGB", (600, 400), "white")
     draw = ImageDraw.Draw(base)
     for index, char in enumerate("SCANNED DOCUMENT"):
@@ -492,6 +499,45 @@ def test_upright_scan_not_false_negative_90() -> None:
         draw.text((40 + index * 18, 180), char, fill="black")
     _, net = deskew_image(base)
     assert net == 0.0, net
+
+
+def test_bottom_weighted_upright_scan_stays_zero_without_osd(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: text position on a valid upright page is not 180° evidence."""
+    monkeypatch.setenv("DESKEW_DEBUG", "1")
+    monkeypatch.delenv("DESKEW_HEURISTIC_180", raising=False)
+    monkeypatch.setattr("app.services.deskew._osd_cardinal_ccw", lambda *_a, **_k: None)
+    monkeypatch.setattr("app.services.deskew._tesseract_deskew_degrees", lambda *_a: 0.0)
+
+    base = Image.new("RGB", (600, 400), "white")
+    draw = ImageDraw.Draw(base)
+    for index, char in enumerate("SCANNED DOCUMENT"):
+        draw.text((40 + index * 18, 240), char, fill="black")
+
+    _, net = deskew_image(base, debug_label="bottom weighted")
+    trace = consume_deskew_debug_trace()
+    assert net == 0.0, net
+    assert any("upright_no_heuristic_180" in line for line in trace)
+    assert not any("landscape_flip_apply" in line for line in trace)
+
+
+def test_bottom_weighted_layout_crop_tilt_stays_zero_without_osd(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: layout angle reporting must not mark upright crops as 180°."""
+    from app.services.deskew import detect_original_tilt
+
+    monkeypatch.delenv("DESKEW_HEURISTIC_180", raising=False)
+    monkeypatch.setattr("app.services.deskew._osd_cardinal_ccw", lambda *_a, **_k: None)
+    monkeypatch.setattr("app.services.deskew._tesseract_deskew_degrees", lambda *_a: 0.0)
+
+    crop = Image.new("RGB", (800, 300), "white")
+    draw = ImageDraw.Draw(crop)
+    for index, char in enumerate("Einh. Text    Einzelpreis    Gesamt"):
+        draw.text((40 + index * 12, 220), char, fill="black")
+
+    assert detect_original_tilt(crop) == 0.0
 
 
 def test_detect_page_angle_near_80_not_snapped_to_opposite_90() -> None:
@@ -526,7 +572,10 @@ def test_deskew_corrects_upside_down_after_large_skew() -> None:
     assert vcenter is not None and vcenter < 0.5, vcenter
 
 
-def test_deskew_image_applies_upside_down_correction() -> None:
+def test_deskew_image_applies_upside_down_correction(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.services.deskew._osd_cardinal_ccw", lambda *_a, **_k: 180)
+    monkeypatch.setattr("app.services.deskew._tesseract_deskew_degrees", lambda *_a: 0.0)
+
     upside_down = _text_image().transpose(Image.Transpose.ROTATE_180)
     _, net = deskew_image(upside_down)
     assert net == 180.0
