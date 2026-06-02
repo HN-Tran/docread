@@ -18,6 +18,7 @@ from app.api.routes import (
     compat_sync_analyze,
     compat_usage_logs,
 )
+from app.config import get_settings
 from app.services.analyze_operation_store import AnalyzeOperationStore
 from app.services.backend_router import OCRBackendRouter
 
@@ -447,3 +448,40 @@ def test_sync_analyze_rejects_unknown_model() -> None:
         )
 
     assert exc_info.value.status_code == 404
+
+
+def test_sync_analyze_uses_configured_model_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AZURE_COMPAT_READ_MODEL", "prebuilt-layout")
+    monkeypatch.setenv("AZURE_COMPAT_LAYOUT_MODEL", "prebuilt-layout")
+    fake_pipeline = FakeBackendRouter()
+    response = asyncio.run(
+        compat_sync_analyze(
+            request=_request(body=_png_bytes(), content_type="application/octet-stream"),
+            modelId="prebuilt-layout",
+            api_version="2022-08-31",
+            pages=None,
+            locale=None,
+            string_index_type=None,
+            expert_enable_layout=None,
+            expert_per_region_ocr=None,
+            expert_assemble_from_regions=None,
+            pipeline=cast(OCRBackendRouter, fake_pipeline),
+        )
+    )
+    payload = _json_body(response)
+
+    assert fake_pipeline.last_call["expert_enable_layout"] is True
+    assert payload["analyzeResult"]["modelId"] == "prebuilt-layout"
+
+
+def test_compat_service_ready_uses_configured_read_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AZURE_COMPAT_READ_MODEL", "prebuilt-layout")
+    monkeypatch.delenv("AZURE_COMPAT_LAYOUT_MODEL", raising=False)
+    assert get_settings().azure_compat_read_model == "prebuilt-layout"
+    response = asyncio.run(compat_service_ready())
+    payload = _json_body(response)
+    assert payload["service"] == "prebuilt-layout"

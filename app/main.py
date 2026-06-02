@@ -61,10 +61,10 @@ def _ui_context(request: Request, settings: Settings) -> dict[str, Any]:
     }
 
 
-def _status_payload() -> dict[str, str]:
+def _status_payload(*, settings: Settings) -> dict[str, str]:
     return {
         "status": "ok",
-        "service": "prebuilt-read",
+        "service": settings.azure_compat_read_model,
         "apiStatus": "Healthy",
         "apiStatusMessage": "Service is running.",
     }
@@ -187,7 +187,7 @@ def _create_ocr_app(*, settings: Settings) -> FastAPI:
 
     @app.get("/status")
     async def status() -> dict[str, str]:
-        return _status_payload()
+        return _status_payload(settings=settings)
 
     app.add_api_route("/status/", status, methods=["GET"], include_in_schema=False)
 
@@ -278,7 +278,7 @@ def create_app() -> FastAPI:
 
     @root_app.get("/status")
     async def status() -> dict[str, str]:
-        return _status_payload()
+        return _status_payload(settings=settings)
 
     root_app.add_api_route("/status/", status, methods=["GET"], include_in_schema=False)
     root_app.mount(base_path, ocr_app)

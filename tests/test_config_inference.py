@@ -29,6 +29,14 @@ def test_get_settings_extra_providers_json(monkeypatch: pytest.MonkeyPatch) -> N
     )
 
 
+def test_get_settings_azure_compat_models(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AZURE_COMPAT_READ_MODEL", "prebuilt-layout")
+    monkeypatch.setenv("AZURE_COMPAT_LAYOUT_MODEL", "prebuilt-read")
+    settings = get_settings()
+    assert settings.azure_compat_read_model == "prebuilt-layout"
+    assert settings.azure_compat_layout_model == "prebuilt-read"
+
+
 def test_get_settings_openai_compatible_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("INFERENCE_PROVIDER", "openai_compatible")
     monkeypatch.setenv("INFERENCE_BASE_URL", "http://vllm.local/v1")

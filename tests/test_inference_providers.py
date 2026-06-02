@@ -38,6 +38,8 @@ def _base_settings(**overrides: object) -> Settings:
         "ocr_expert_compare_include_detector_only": False,
         "ocr_expert_layout_max_dim": 1800,
         "ocr_binarized_min_dim": 1800,
+        "azure_compat_read_model": "prebuilt-read",
+        "azure_compat_layout_model": "prebuilt-layout",
         "azure_preset_label": "",
         "azure_preset_endpoint": "",
         "azure_preset_layout_endpoint": "",

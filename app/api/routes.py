@@ -71,7 +71,6 @@ compat_router = APIRouter()
 API_VERSION = "2026-03-09-preview"
 STRING_INDEX_TYPE = "textElements"
 AZURE_API_VERSION = "2022-08-31"
-AZURE_MODEL_ID = "prebuilt-read"
 SUPPORTED_STRING_INDEX_TYPES = {"textElements", "unicodeCodePoint", "utf16CodeUnit"}
 _WORD_FAMILY_MIMES = {
     "application/msword",
@@ -1192,10 +1191,20 @@ def get_mlflow_sink(request: Request) -> MlflowSink:
     return cast(MlflowSink, request.app.state.mlflow_sink)
 
 
+def _azure_compat_model_ids() -> set[str]:
+    settings = get_settings()
+    return {settings.azure_compat_read_model, settings.azure_compat_layout_model}
+
+
+def _is_azure_compat_layout_model(model_id: str) -> bool:
+    return model_id == get_settings().azure_compat_layout_model
+
+
 def _service_status_payload() -> dict[str, str]:
+    read_model = get_settings().azure_compat_read_model
     return {
         "status": "ok",
-        "service": "prebuilt-read",
+        "service": read_model,
         "apiStatus": "Healthy",
         "apiStatusMessage": "Service is running.",
     }
@@ -1203,18 +1212,15 @@ def _service_status_payload() -> dict[str, str]:
 
 def _usage_logs_payload() -> dict[str, object]:
     return {
-        "apiType": "prebuilt-read",
+        "apiType": get_settings().azure_compat_read_model,
         "serviceName": "docread",
         "type": "UsageLogs",
         "meters": [],
     }
 
 
-_AZURE_MODEL_IDS = {AZURE_MODEL_ID, "prebuilt-layout"}
-
-
 def _validate_azure_model_id(model_id: str) -> str:
-    if model_id not in _AZURE_MODEL_IDS:
+    if model_id not in _azure_compat_model_ids():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Unbekanntes Modell: {model_id}",
@@ -2896,7 +2902,7 @@ async def compat_sync_analyze(
     normalized_string_index_type = _normalize_string_index_type(string_index_type)
     selected_pages = _parse_pages_spec(pages)
 
-    if model_id == "prebuilt-layout":
+    if _is_azure_compat_layout_model(model_id):
         if expert_enable_layout is None:
             expert_enable_layout = True
         if expert_per_region_ocr is None:
@@ -2962,7 +2968,7 @@ async def compat_analyze(
     normalized_string_index_type = _normalize_string_index_type(string_index_type)
     selected_pages = _parse_pages_spec(pages)
 
-    if model_id == "prebuilt-layout":
+    if _is_azure_compat_layout_model(model_id):
         if expert_enable_layout is None:
             expert_enable_layout = True
         if expert_per_region_ocr is None:

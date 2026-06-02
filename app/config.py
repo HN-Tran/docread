@@ -123,6 +123,8 @@ class Settings:
     ocr_expert_compare_include_detector_only: bool
     ocr_expert_layout_max_dim: int
     ocr_binarized_min_dim: int
+    azure_compat_read_model: str
+    azure_compat_layout_model: str
     azure_preset_label: str
     azure_preset_endpoint: str
     azure_preset_layout_endpoint: str
@@ -227,6 +229,10 @@ def get_settings() -> Settings:
         ),
         ocr_expert_layout_max_dim=max(256, _env_int("OCR_EXPERT_LAYOUT_MAX_DIM", 1800)),
         ocr_binarized_min_dim=max(0, _env_int("OCR_BINARIZED_MIN_DIM", 1800)),
+        azure_compat_read_model=os.getenv("AZURE_COMPAT_READ_MODEL", "prebuilt-read").strip()
+        or "prebuilt-read",
+        azure_compat_layout_model=os.getenv("AZURE_COMPAT_LAYOUT_MODEL", "prebuilt-layout").strip()
+        or "prebuilt-layout",
         azure_preset_label=os.getenv("AZURE_PRESET_LABEL", "").strip(),
         azure_preset_endpoint=os.getenv("AZURE_PRESET_ENDPOINT", "").strip(),
         azure_preset_layout_endpoint=os.getenv("AZURE_PRESET_LAYOUT_ENDPOINT", "").strip(),
