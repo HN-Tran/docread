@@ -1,7 +1,12 @@
 """Detect and correct document skew and cardinal misorientation.
 
-Orientation is inferred from page content (projection variance, text position),
-not EXIF metadata. Scanned PDFs and TIFFs rarely have trustworthy EXIF tags.
+Fine skew (scanner tilt, typically under ~15°) uses Tesseract PSM 2 deskew only
+(same as `paperless-ngx` / OCRmyPDF). Quarter-turn orientation uses Tesseract OSD
+when enabled, plus content heuristics. Projection-variance is retained only as an
+orientation hint for cardinal/diamond branching, not for applying fine skew.
+
+Orientation does not use EXIF metadata. Scanned PDFs and TIFFs rarely have
+trustworthy EXIF tags.
 
 PDF pages may carry a ``/Rotate`` entry (clockwise degrees); ``pypdfium2`` does not
 apply it during ``page.render()`` — callers must bake that rotation into pixels
@@ -20,6 +25,11 @@ import io
 import logging
 import os
 import re
+import shutil
+import subprocess
+import tempfile
+from math import pi
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -98,9 +108,15 @@ def _to_gray(img: Image.Image) -> np.ndarray:
 
 
 def _proj_variance(gray: np.ndarray) -> float:
-    """Variance of row-wise dark-pixel sums. High when text lines are horizontal."""
+    """Variance of the per-row dark-pixel FRACTION. High when text lines are horizontal.
+
+    Uses the per-row mean (fraction of dark pixels) rather than the raw sum so the
+    score is comparable across 90° rotations regardless of image dimensions. A raw
+    sum scales with row length, so rotating a portrait page makes rows longer and
+    inflates its variance — biasing portrait pages toward a false "sideways" reading.
+    """
     _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    return float(np.var(binary.sum(axis=1).astype(np.float64)))
+    return float(np.var(binary.mean(axis=1).astype(np.float64)))
 
 
 def _boundary_asymmetry(gray: np.ndarray) -> float:
@@ -421,7 +437,6 @@ def _skew_probe_tiles(
     return tiles
 
 
-_PAGE_WIDE_SKEW_SOURCES = frozenset({"content_bbox", "full_page", "tight_text"})
 _DIAMOND_AUTHORITATIVE_BRANCHES = frozenset(
     {"diamond_zone_near_horizontal", "small_island_upright"}
 )
@@ -431,10 +446,20 @@ def _is_skew_tile_source(source: str) -> bool:
     return source.startswith("tile_") or source.startswith("probe_tile_")
 
 
-def _is_diamond_zone_spurious_page_angle(angle: float, source: str) -> bool:
-    """~45° from page-wide probes is usually binding/table grid noise, not scanner skew."""
-    return source in _PAGE_WIDE_SKEW_SOURCES and (
-        _DIAMOND_ZONE_MIN_DEG <= abs(angle) <= _DIAMOND_ZONE_MAX_DEG
+def _is_near_perpendicular_spurious_skew(angle: float) -> bool:
+    """Projection variance often peaks near ±90° on upright pages (e.g. ~77°), not real tilt."""
+    return _NEAR_PERPENDICULAR_MIN_DEG <= abs(angle) < _NEAR_CARDINAL_SKEW_DEG
+
+
+def _near_perpendicular_conflicts_with_tiles(
+    img: Image.Image, skew_hint: float, *, min_angle_deg: float = 0.5
+) -> bool:
+    """True when a ~70–85° hint disagrees with near-upright tile readings."""
+    if not _is_near_perpendicular_spurious_skew(skew_hint):
+        return False
+    return (
+        len(_near_horizontal_tile_angles(_skew_tile_candidates(img), min_angle_deg=min_angle_deg))
+        >= _DIAMOND_ZONE_TILE_MIN
     )
 
 
@@ -451,27 +476,6 @@ def _near_horizontal_tile_angles(
         if min_angle_deg <= abs(angle) <= _NEAR_HORIZONTAL_MAX_DEG:
             angles.append(angle)
     return angles
-
-
-def _pick_angle_from_tile_consensus(
-    candidates: list[tuple[float, str]],
-    usable: list[tuple[float, str]],
-    *,
-    min_angle_deg: float,
-    min_tiles: int,
-) -> tuple[float, str] | None:
-    meaningful = _near_horizontal_tile_angles(candidates, min_angle_deg=min_angle_deg)
-    if len(meaningful) < min_tiles:
-        return None
-    median = sorted(meaningful)[len(meaningful) // 2]
-    tile_matches = [
-        (angle, source)
-        for angle, source in usable
-        if _is_skew_tile_source(source) and abs(angle - median) <= _NEAR_HORIZONTAL_MAX_DEG
-    ]
-    if tile_matches:
-        return min(tile_matches, key=lambda item: abs(item[0] - median))
-    return median, "tile_consensus"
 
 
 def _skew_tile_candidates(img: Image.Image) -> list[tuple[float, str]]:
@@ -502,151 +506,75 @@ def _diamond_zone_skew_conflicts_with_tiles(
     )
 
 
-def _full_page_tile_angles(candidates: list[tuple[float, str]]) -> list[float]:
-    return [angle for angle, source in candidates if source.startswith("tile_")]
+def _tesseract_fine_enabled() -> bool:
+    """Use Tesseract PSM 2 deskew for fine skew (paperless-ngx / OCRmyPDF default)."""
+    return os.getenv("DESKEW_TESSERACT_FINE", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
 
 
-def _page_tiles_indicate_upright(
-    candidates: list[tuple[float, str]], *, min_angle_deg: float
-) -> bool:
-    """Most full-page tiles read upright; lone probe corners should not skew the page."""
-    page_angles = _full_page_tile_angles(candidates)
-    if len(page_angles) < 3:
-        return False
-    near_zero = sum(1 for angle in page_angles if abs(angle) < min_angle_deg)
-    meaningful = [
-        angle for angle in page_angles if min_angle_deg <= abs(angle) <= _NEAR_HORIZONTAL_MAX_DEG
-    ]
-    if (
-        near_zero >= max(3, int(len(page_angles) * 0.55))
-        and len(meaningful) < _DIAMOND_ZONE_TILE_MIN
-    ):
-        return True
-    positives = [angle for angle in meaningful if angle > min_angle_deg]
-    negatives = [angle for angle in meaningful if angle < -min_angle_deg]
-    if positives and negatives:
-        return max(abs(angle) for angle in meaningful) <= _NEAR_HORIZONTAL_MAX_DEG
-    return False
+def _tesseract_deskew_degrees(img: Image.Image) -> float | None:
+    """Small skew angle in degrees (PIL CCW rotate), via Tesseract ``--psm 2``.
 
-
-def _page_tile_consensus(
-    candidates: list[tuple[float, str]],
-    *,
-    min_angle_deg: float,
-    min_tiles: int = 2,
-) -> tuple[float, str] | None:
-    page_candidates = [
-        (angle, source) for angle, source in candidates if source.startswith("tile_")
-    ]
-    if not page_candidates:
+    Matches OCRmyPDF ``get_deskew``: parses ``Deskew angle`` from stdout (radians).
+    Returns ``None`` when Tesseract is disabled, missing, or cannot estimate skew.
+    """
+    if not _tesseract_fine_enabled() or shutil.which("tesseract") is None:
         return None
-    usable = [
-        (angle, source)
-        for angle, source in page_candidates
-        if min_angle_deg <= abs(angle) < _NEAR_CARDINAL_SKEW_DEG and abs(angle) <= 20.0
-    ]
-    return _pick_angle_from_tile_consensus(
-        page_candidates,
-        usable,
-        min_angle_deg=min_angle_deg,
-        min_tiles=min_tiles,
-    )
 
+    prepared = _prepare_osd_image(img.convert("RGB"))
+    tmp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp_path = tmp.name
+            prepared.save(tmp_path, format="PNG")
 
-def _pick_fine_skew_from_candidates(
-    candidates: list[tuple[float, str]],
-    *,
-    default_source: str,
-    cardinal_skew_hint: float | None = None,
-    min_angle_deg: float = 0.5,
-    trust_cardinal_skew_hint: bool = False,
-    cardinal_branch: str = "",
-) -> tuple[float, str]:
-    """Tiles are capped at ±20° to drop margin noise; page-wide views keep full range."""
-    allow_single_tile = cardinal_branch in _DIAMOND_AUTHORITATIVE_BRANCHES
-    min_tile_votes = 1 if allow_single_tile else _DIAMOND_ZONE_TILE_MIN
+        lang = os.getenv("DESKEW_TESSERACT_LANG", "osd").strip()
+        args = ["tesseract"]
+        if lang.lower() not in {"", "none", "off"}:
+            args.extend(["-l", lang])
+        args.extend(["--psm", "2", tmp_path, "stdout"])
 
-    page_upright = _page_tiles_indicate_upright(candidates, min_angle_deg=min_angle_deg)
-    if page_upright:
-        return 0.0, default_source
+        timeout_raw = os.getenv("DESKEW_TESSERACT_TIMEOUT", "60").strip()
+        try:
+            timeout = max(1.0, float(timeout_raw))
+        except ValueError:
+            timeout = 60.0
 
-    page_consensus = _page_tile_consensus(
-        candidates, min_angle_deg=min_angle_deg, min_tiles=_DIAMOND_ZONE_TILE_MIN
-    )
-    if page_consensus is not None:
-        return page_consensus
-
-    usable: list[tuple[float, str]] = []
-    had_spurious_page_diamond = False
-    for angle, source in candidates:
-        if abs(angle) < 0.5 or abs(angle) >= _NEAR_CARDINAL_SKEW_DEG:
-            continue
-        if _is_diamond_zone_spurious_page_angle(angle, source):
-            had_spurious_page_diamond = True
-            continue
-        if _is_skew_tile_source(source) and abs(angle) > 20.0:
-            continue
-        usable.append((angle, source))
-    if not usable:
-        if (
-            trust_cardinal_skew_hint
-            and cardinal_skew_hint is not None
-            and abs(cardinal_skew_hint) >= min_angle_deg
-            and abs(cardinal_skew_hint) <= _NEAR_HORIZONTAL_MAX_DEG
-            and had_spurious_page_diamond
-        ):
-            return cardinal_skew_hint, default_source
-        return 0.0, default_source
-
-    max_pick = max(usable, key=lambda item: abs(item[0]))
-
-    tile_consensus = _pick_angle_from_tile_consensus(
-        candidates,
-        usable,
-        min_angle_deg=min_angle_deg,
-        min_tiles=min_tile_votes,
-    )
-    if tile_consensus is not None:
-        if page_upright and tile_consensus[1].startswith("probe_tile_"):
-            _deskew_debug(
-                "fine_skew_skip",
-                reason="probe_tile_overridden_by_page_upright",
-                probe_angle=round(tile_consensus[0], 2),
-            )
-        else:
-            return tile_consensus
-
-    if page_upright:
-        return 0.0, default_source
-
-    if (
-        trust_cardinal_skew_hint
-        and cardinal_skew_hint is not None
-        and abs(cardinal_skew_hint) >= min_angle_deg
-        and abs(cardinal_skew_hint) <= _NEAR_HORIZONTAL_MAX_DEG
-        and (
-            had_spurious_page_diamond
-            or _DIAMOND_ZONE_MIN_DEG <= abs(max_pick[0]) <= _DIAMOND_ZONE_MAX_DEG
+        proc = subprocess.run(
+            args,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
         )
-    ):
-        return cardinal_skew_hint, default_source
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    finally:
+        if tmp_path is not None:
+            Path(tmp_path).unlink(missing_ok=True)
 
-    if len(usable) >= 3:
-        angles = sorted(angle for angle, _ in usable)
-        median = angles[len(angles) // 2]
-        if (
-            abs(median) <= _NEAR_HORIZONTAL_MAX_DEG
-            and _DIAMOND_ZONE_MIN_DEG <= abs(max_pick[0]) <= _DIAMOND_ZONE_MAX_DEG
-        ):
-            return min(usable, key=lambda item: abs(item[0] - median))
+    output = (proc.stdout or b"") + (proc.stderr or b"")
+    if b"Empty page" in output:
+        return None
 
-    if abs(max_pick[0]) <= _NEAR_HORIZONTAL_MAX_DEG:
-        return max_pick
-    if abs(max_pick[0]) >= _NEAR_CARDINAL_SKEW_DEG:
-        return max_pick
-    if cardinal_branch in _DIAMOND_AUTHORITATIVE_BRANCHES:
-        return 0.0, default_source
-    return max_pick
+    if proc.returncode not in (0, 1) and b"Deskew angle" not in output:
+        return None
+
+    match = re.search(rb"Deskew angle:\s*([-0-9.eE+]+)", output)
+    if match is None:
+        return None
+
+    degrees = (180.0 / pi) * float(match.group(1))
+    _deskew_debug("tesseract_deskew", degrees=round(degrees, 3))
+    return degrees
+
+
+def _orientation_skew_hint_degrees(img: Image.Image) -> float:
+    """Projection tilt hint for cardinal/sideways/diamond branching (not applied as fine skew)."""
+    return detect_page_angle(img, max_scan_dim=_fine_skew_scan_dim_for(img))
 
 
 def _measure_fine_skew_angle(
@@ -657,48 +585,15 @@ def _measure_fine_skew_angle(
     trust_cardinal_skew_hint: bool = False,
     cardinal_branch: str = "",
 ) -> tuple[float, str]:
-    """Pick sub-quarter-turn tilt from full page, tight text, and tiled probes."""
-    candidates: list[tuple[float, str]] = []
-
-    probe, probe_source, _ = _orientation_probe_image(img)
-    for view, source in (
-        (probe, probe_source),
-        (img, "full_page"),
-    ):
-        scan_dim = _fine_skew_scan_dim_for(view)
-        candidates.append((detect_page_angle(view, max_scan_dim=scan_dim), source))
-
-    tight = _tight_text_bbox_for_skew(img)
-    if tight is not None:
-        x0, y0, x1, y1 = tight
-        if (x1 - x0) >= 80 and (y1 - y0) >= 80:
-            tight_img = img.crop(tight)
-            scan_dim = _fine_skew_scan_dim_for(tight_img)
-            candidates.append((detect_page_angle(tight_img, max_scan_dim=scan_dim), "tight_text"))
-
-    for tile, tile_source in _skew_probe_tiles(img):
-        scan_dim = _fine_skew_scan_dim_for(tile)
-        candidates.append((detect_page_angle(tile, max_scan_dim=scan_dim), tile_source))
-
-    if probe.size != img.size:
-        for tile, tile_source in _skew_probe_tiles(probe):
-            scan_dim = _fine_skew_scan_dim_for(tile)
-            candidates.append(
-                (detect_page_angle(tile, max_scan_dim=scan_dim), f"probe_{tile_source}")
-            )
-
-    if _deskew_debug_enabled():
-        for angle, source in candidates:
-            _deskew_debug("fine_skew_sample", source=source, degrees=round(angle, 2))
-
-    return _pick_fine_skew_from_candidates(
-        candidates,
-        default_source=probe_source,
-        cardinal_skew_hint=cardinal_skew_hint,
-        min_angle_deg=min_angle_deg,
-        trust_cardinal_skew_hint=trust_cardinal_skew_hint,
-        cardinal_branch=cardinal_branch,
-    )
+    """Fine skew via Tesseract PSM 2 only (paperless-ngx / OCRmyPDF)."""
+    del cardinal_skew_hint, trust_cardinal_skew_hint, cardinal_branch
+    tess = _tesseract_deskew_degrees(img)
+    if tess is None:
+        _deskew_debug("fine_skew_skip", reason="tesseract_unavailable")
+        return 0.0, "tesseract_unavailable"
+    if abs(tess) < min_angle_deg:
+        return 0.0, "tesseract_deskew"
+    return tess, "tesseract_deskew"
 
 
 def _apply_fine_skew(
@@ -948,8 +843,17 @@ def _pick_cardinal_on_probe(
 ) -> tuple[int, str, float]:
     """Cardinal orientation on a probe image (full page or content crop)."""
     tile_img = full_img if full_img is not None else probe
-    skew_hint = detect_page_angle(probe)
+    skew_hint = _orientation_skew_hint_degrees(probe)
     _deskew_debug("skew_hint", degrees=round(skew_hint, 2))
+    if _near_perpendicular_conflicts_with_tiles(
+        tile_img, skew_hint, min_angle_deg=min_angle_deg
+    ):
+        _deskew_debug(
+            "skew_hint",
+            reason="near_perpendicular_spurious",
+            degrees=round(skew_hint, 2),
+        )
+        skew_hint = 0.0
 
     # Layout crops sit on an already deskewed page — only small skew, never 180° flips.
     if deskew_context == "region" and abs(skew_hint) < _NEAR_CARDINAL_SKEW_DEG:
@@ -1087,6 +991,8 @@ _SKEW_ONLY_CARDINAL_MIN_DEG = 15.0
 _DIAMOND_ZONE_MIN_DEG = 35.0
 _DIAMOND_ZONE_MAX_DEG = 55.0
 _NEAR_HORIZONTAL_MAX_DEG = 15.0
+_FINE_SKEW_MAX_DEG = 20.0
+_NEAR_PERPENDICULAR_MIN_DEG = 70.0
 _DIAMOND_ZONE_TILE_MIN = 2
 _CONTENT_BBOX_MIN_FILL_FOR_SIDEWAYS = 0.10
 
@@ -1212,7 +1118,7 @@ def detect_original_tilt(img: Image.Image, *, min_angle_deg: float = 0.5) -> flo
     """Tilt of content on the original scan (0° = upright); cardinal + fine skew."""
     cardinal = _preview_cardinal_tilt(img)
     fine, _source = _measure_fine_skew_angle(img)
-    if abs(fine) >= _NEAR_CARDINAL_SKEW_DEG or abs(fine) > 20.0:
+    if abs(fine) >= _NEAR_CARDINAL_SKEW_DEG or abs(fine) > _FINE_SKEW_MAX_DEG:
         fine = 0.0
 
     if cardinal != 0:
@@ -1223,10 +1129,6 @@ def detect_original_tilt(img: Image.Image, *, min_angle_deg: float = 0.5) -> flo
 
     if min_angle_deg <= abs(fine) < _NEAR_CARDINAL_SKEW_DEG:
         return round(float(fine), 1)
-
-    coarse = detect_page_angle(img, max_scan_dim=_fine_skew_scan_dim_for(img))
-    if abs(coarse) >= min_angle_deg and abs(coarse) < _NEAR_CARDINAL_SKEW_DEG:
-        return round(float(coarse), 1)
     return 0.0
 
 

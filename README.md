@@ -30,7 +30,7 @@ Most OCR setups force a trade-off: send documents to a cloud API (per-page cost,
 |------------|--------------|
 | **Your stack, your data** | Ollama, vLLM, llama.cpp, or any OpenAI-compatible vision server — no vendor lock-in, no outbound document upload. |
 | **Two modes, one install** | **Direct** (`backend=direct`) for fast full-page OCR; **Dev** (`backend=expert`) for layout regions, tables, word boxes, and per-region deskew on difficult scans. |
-| **Real-world scan handling** | Automatic deskew and quarter-turn detection (Tesseract OSD, projection variance, tiled fine skew) — built for A4 margins, curved book photos, and small content islands on large pages. |
+| **Real-world scan handling** | Automatic deskew and quarter-turn detection (Tesseract OSD + PSM 2 fine skew, paperless-style) — built for A4 margins, curved book photos, and small content islands on large pages. |
 | **See what the model saw** | Interactive preview with layout overlays, word polygons, markdown output, and per-region tilt metadata. |
 | **Prove accuracy in-house** | Side-by-side compare against Azure, Google Vision, or another docread instance; batch benchmark with CER/WER when you have reference text; optional MLflow tracking. |
 | **Drop-in for Azure workflows** | `prebuilt-read` sync/async endpoints compatible with Azure Document Intelligence (formerly Form Recognizer). |
@@ -149,6 +149,9 @@ OpenAI-compatible example (GLM-OCR via Docker: [`docs/llamacpp-docker-glm-ocr.md
 | `DESKEW_PAGE_CARDINAL` | `true` | Quarter-turn detection on content-bbox probe (margin scans). |
 | `DESKEW_OSD` | `1` | Tesseract OSD on probe (needs `pytesseract`; in Docker image). |
 | `DESKEW_OSD_MIN_CONFIDENCE` | `1.0` | Minimum OSD confidence to apply a cardinal hint. |
+| `DESKEW_TESSERACT_FINE` | `1` | Fine skew via Tesseract PSM 2 deskew (paperless-ngx / OCRmyPDF). |
+| `DESKEW_TESSERACT_LANG` | `osd` | Tesseract `-l` for deskew (`osd`, `eng+deu`, etc.). |
+| `DESKEW_TESSERACT_TIMEOUT` | `60` | Seconds before giving up on Tesseract deskew. |
 | `DESKEW_FINE_SCAN_DIM` | `2400` | Max dimension for tiled fine-skew search. |
 | `DESKEW_MIN_ANGLE_DEG` | `0.5` | Ignore skew corrections smaller than this (degrees). |
 | `DESKEW_CONTENT_BBOX_MAX_FILL` | `0.72` | Use full-page probe when ink fill exceeds this fraction. |
@@ -208,7 +211,7 @@ Shared steps (`app/services/ocr_pipeline.py`, `app/services/deskew.py`):
 
 - RGBA/LA and transparent palette PNGs are composited onto a **white** background (avoids black defaults that would make black text on a transparent background invisible).
 - Bitonal (`1`) and grayscale (`L`) inputs are upscaled to at least `OCR_BINARIZED_MIN_DIM` pixels (default 1800) so models can more reliably distinguish `l`/`I`/`1`.
-- When `DESKEW_ENABLED=true` (default), each page is deskewed **before** OCR. Cardinal turns use a content-bbox probe (helpful on A4 scans with large margins); fine skew uses tiled projection search on large pages. Optional `DESKEW_OSD=1` adds Tesseract OSD on the probe (requires `pytesseract`, included in the Docker image via the `osd` extra).
+- When `DESKEW_ENABLED=true` (default), each page is deskewed **before** OCR. Cardinal turns use a content-bbox probe (helpful on A4 scans with large margins) plus optional Tesseract OSD (`DESKEW_OSD=1`). Fine skew uses Tesseract PSM 2 deskew (`DESKEW_TESSERACT_FINE=1`), same as paperless-ngx / OCRmyPDF — not projection variance.
 - PDF `/Rotate` metadata is baked into pixels before deskew when rendering pages.
 
 **Dev backend** (`app/services/document_pipeline.py`):
