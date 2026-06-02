@@ -19,7 +19,7 @@
       <header class="bench-head">
         <div>
           <h1 data-i18n="bench_title">docread · Benchmark</h1>
-          <p class="sub" data-i18n="bench_subtitle">N files × M runners. CER/WER/F1 when reference texts are provided.</p>
+          <p class="sub" data-i18n="bench_subtitle">N files × M runners. CER/WER score ordered text; R-CER/R-WER tolerate moved blocks; F1 shows token overlap.</p>
         </div>
         <div class="heading-end">
           <div class="locale-toggle" role="group" data-i18n-aria-label="aria_language" aria-label="Language">
@@ -126,9 +126,11 @@
                 <th data-i18n="bench_col_tokens">Tokens</th>
                 <th data-i18n="bench_col_chars">Characters</th>
                 <th data-i18n="bench_col_latency">Latency (ms)</th>
-                <th>CER</th>
-                <th>WER</th>
-                <th>F1</th>
+                <th data-i18n-title="metrics_tooltip_cer" title="Standard Character Error Rate: Levenshtein(reference, hypothesis) / |reference characters|. Order-sensitive; lower is better.">CER</th>
+                <th data-i18n-title="metrics_tooltip_relaxed_cer" title="Layout-relaxed CER: splits text into blocks, matches blocks by content, then computes character edit distance. Not standard CER.">R-CER</th>
+                <th data-i18n-title="metrics_tooltip_wer" title="Standard Word Error Rate: Levenshtein on words / |reference words|. Order-sensitive; lower is better.">WER</th>
+                <th data-i18n-title="metrics_tooltip_relaxed_wer" title="Layout-relaxed WER: splits text into blocks, matches blocks by content, then computes word edit distance. Not standard WER.">R-WER</th>
+                <th data-i18n-title="bench_token_f1_title" title="Order-free token overlap against the reference. Lower penalty for moved text than CER/WER.">F1</th>
                 <th data-i18n="bench_col_notes">Notes</th>
                 <th></th>
               </tr>

@@ -456,6 +456,14 @@
   padding: 0 0.15rem;
 }
 
+.bench-diff-move {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--accent);
+  border-radius: 2px;
+  border-bottom: 1px dotted currentColor;
+  padding: 0 0.15rem;
+}
+
 @media (max-width: 760px) {
   .bench-runners {
     grid-template-columns: 1fr;

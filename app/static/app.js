@@ -2271,8 +2271,14 @@ function _renderReferenceTab(reference) {
     row("CER", fmt(ours.cer), fmt(theirsRef.cer), {
       tooltip: tr("metrics_tooltip_cer"),
     }),
+    row("R-CER", fmt(ours.relaxed_cer), fmt(theirsRef.relaxed_cer), {
+      tooltip: tr("metrics_tooltip_relaxed_cer"),
+    }),
     row("WER", fmt(ours.wer), fmt(theirsRef.wer), {
       tooltip: tr("metrics_tooltip_wer"),
+    }),
+    row("R-WER", fmt(ours.relaxed_wer), fmt(theirsRef.relaxed_wer), {
+      tooltip: tr("metrics_tooltip_relaxed_wer"),
     }),
     row("Token-Precision", fmtPct(ours.token_precision), fmtPct(theirsRef.token_precision)),
     row("Token-Recall", fmtPct(ours.token_recall), fmtPct(theirsRef.token_recall)),

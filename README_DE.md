@@ -30,9 +30,9 @@ Die meisten OCR-Lösungen zwingen zu Kompromissen: Cloud-API (Kosten pro Seite, 
 |---------|---------|
 | **Eigener Stack, eigene Daten** | Ollama, vLLM, llama.cpp oder jeder OpenAI-kompatible Vision-Server — kein Vendor-Lock-in, kein Upload in die Cloud. |
 | **Zwei Modi, eine Installation** | **Direct** (`backend=direct`) für schnelle Ganzseiten-OCR; **Dev** (`backend=expert`) für Layout-Regionen, Tabellen, Wortboxen und Regions-Deskew bei schwierigen Scans. |
-| **Für echte Scans gebaut** | Automatisches Deskew und Vierteldrehung (Tesseract OSD, Projektionsvarianz, gekachelte Feinkorrektur) — für A4-Ränder, gebogene Buchfotos und kleine Inhaltsinseln auf großen Seiten. |
+| **Für echte Scans gebaut** | Automatisches Deskew und Vierteldrehung (Tesseract OSD + PSM-2-Feinskew, paperless-artig) — für A4-Ränder, gebogene Buchfotos und kleine Inhaltsinseln auf großen Seiten. |
 | **Sehen, was das Modell sah** | Interaktive Vorschau mit Layout-Overlays, Wortpolygonen, Markdown-Ausgabe und Neigungsmetadaten pro Region. |
-| **Genauigkeit intern belegen** | Direktvergleich mit Azure, Google Vision oder einer anderen docread-Instanz; Batch-Benchmark mit CER/WER bei Referenztext; optional MLflow. |
+| **Genauigkeit intern belegen** | Direktvergleich mit Azure, Google Vision oder einer anderen docread-Instanz; Batch-Benchmark mit standardmäßigen CER/WER plus layout-entspannten R-CER/R-WER bei Referenztext; optional MLflow. |
 | **Drop-in für Azure-Workflows** | `prebuilt-read` Sync-/Async-Endpunkte, kompatibel mit Azure Document Intelligence (ehemals Form Recognizer). |
 | **Datenhoheit & Datenschutz** | Self-hosted — keine Pflicht-Cloud-OCR, keine Telemetrie an die Projekt-Maintainer; geeignet für On-Premises, Private Cloud und air-gapped Betrieb unter eigener Kontrolle. |
 
@@ -55,7 +55,7 @@ Bei schwierigeren Seiten als flache Scans läuft eine vollständige Pipeline:
 
 ### Evaluation & Benchmarking
 
-- **Vergleich** (`POST /api/compare`) — docread gegen Azure, Google Vision, Peer-Instanz oder beliebigen HTTP-Text-Endpunkt; Token-Diff und optional CER/WER.
+- **Vergleich** (`POST /api/compare`) — docread gegen Azure, Google Vision, Peer-Instanz oder beliebigen HTTP-Text-Endpunkt; Token-Diff und optional CER/WER/R-CER/R-WER.
 - **Benchmark** (`/benchmark` oder `POST /api/benchmark`) — viele Dateien × viele Modelle/Engines mit Aggregatmetriken und CSV-Export.
 - **Offline-Eval** (`eval/run`) — Regression auf festem Samplesatz mit Manifest.
 
@@ -149,6 +149,10 @@ OpenAI-kompatibles Beispiel (GLM-OCR per Docker: [`docs/llamacpp-docker-glm-ocr.
 | `DESKEW_PAGE_CARDINAL` | `true` | Vierteldrehung auf Content-BBox-Probe (Rand-Scans). |
 | `DESKEW_OSD` | `1` | Tesseract-OSD auf der Probe (benötigt `pytesseract`; im Docker-Image). |
 | `DESKEW_OSD_MIN_CONFIDENCE` | `1.0` | Mindest-OSD-Konfidenz für Kardinal-Hinweis. |
+| `DESKEW_HEURISTIC_180` | `0` | Nicht-OSD-180°-Drehungen aktivieren; standardmäßig aus, um False Positives auf korrekt ausgerichteten Seiten/Crops zu vermeiden. |
+| `DESKEW_TESSERACT_FINE` | `1` | Fein-Skew via Tesseract PSM 2 Deskew (paperless-ngx / OCRmyPDF). |
+| `DESKEW_TESSERACT_LANG` | `osd` | Tesseract `-l` für Deskew (`osd`, `eng+deu` usw.). |
+| `DESKEW_TESSERACT_TIMEOUT` | `60` | Sekunden bis zum Abbruch des Tesseract-Deskew. |
 | `DESKEW_FINE_SCAN_DIM` | `2400` | Max. Dimension für gekachelte Fein-Skew-Suche. |
 | `DESKEW_MIN_ANGLE_DEG` | `0.5` | Korrekturen unter diesem Winkel ignorieren (Grad). |
 | `DESKEW_CONTENT_BBOX_MAX_FILL` | `0.72` | Ganzseiten-Probe, wenn Tintenfüllung darüber liegt. |
@@ -208,7 +212,7 @@ Gemeinsame Schritte (`app/services/ocr_pipeline.py`, `app/services/deskew.py`):
 
 - RGBA/LA und transparente Palette-PNGs werden auf **weißem** Hintergrund komponiert (vermeidet schwarze Defaults, die schwarzen Text auf transparentem Hintergrund unsichtbar machen würden).
 - Bitonale (`1`) und Graustufen (`L`) Eingaben werden auf mindestens `OCR_BINARIZED_MIN_DIM` Pixel (Standard 1800) hochskaliert, damit Modelle „l"/„I"/„1" zuverlässiger unterscheiden können.
-- Bei `DESKEW_ENABLED=true` (Standard) wird jede Seite **vor** der OCR begradigt. Vierteldrehungen nutzen eine Content-BBox-Probe (hilfreich bei A4-Scans mit Rand); Fein-Skew nutzt gekachelte Projektionssuche auf großen Seiten. Optional `DESKEW_OSD=1` ergänzt Tesseract-OSD auf der Probe (benötigt `pytesseract`, im Docker-Image über das `osd`-Extra enthalten).
+- Bei `DESKEW_ENABLED=true` (Standard) wird jede Seite **vor** der OCR begradigt. Vierteldrehungen nutzen eine Content-BBox-Probe (hilfreich bei A4-Scans mit Rand) plus optional Tesseract-OSD (`DESKEW_OSD=1`). Fein-Skew nutzt Tesseract PSM 2 Deskew (`DESKEW_TESSERACT_FINE=1`), wie paperless-ngx / OCRmyPDF — nicht Projektionsvarianz.
 - PDF-`/Rotate`-Metadaten werden beim Rendern in Pixel übernommen, bevor Deskew läuft.
 
 **Dev-Backend** (`app/services/document_pipeline.py`):
@@ -344,8 +348,9 @@ Beispiel-Antwort:
 ## Vergleich mit externer OCR-Engine
 
 `POST /api/compare` führt unsere OCR-Pipeline parallel zu einer externen Engine
-aus und liefert Diff, Side-by-Side-Metriken und (optional) CER/WER gegen einen
-Referenztext. `GET /api/compare/engines` listet die unterstützten Engines.
+aus und liefert Diff, Side-by-Side-Metriken und (optional) CER/WER/R-CER/R-WER
+gegen einen Referenztext. `GET /api/compare/engines` listet die unterstützten
+Engines.
 
 **Unterstützte Engines** (`engine`-Form-Feld):
 
@@ -358,7 +363,7 @@ Referenztext. `GET /api/compare/engines` listet die unterstützten Engines.
 
 **Optionale Parameter** (engine-unabhängig):
 
-- `reference_text`: Ground-Truth-Text. Wenn gesetzt, ergänzt die Antwort einen `metrics.reference`-Block mit echten CER, WER und Token-F1 für beide Seiten.
+- `reference_text`: Ground-Truth-Text. Wenn gesetzt, ergänzt die Antwort einen `metrics.reference`-Block mit standardmäßigen CER/WER, layout-entspannten R-CER/R-WER und Token-F1 für beide Seiten.
 - `expert_*` und `backend`: greifen für unsere eigene OCR-Seite (siehe oben).
 - `expert_compare_include_detector_only`: bezieht zusätzlich Wort-Polygone des Detektors in den Diff ein, die kein Layout-Token getroffen haben.
 
@@ -366,7 +371,17 @@ Referenztext. `GET /api/compare/engines` listet die unterstützten Engines.
 
 - `intrinsic`: Tokens, Zeichen, Ø Konfidenz, Latenz pro Seite.
 - `comparison`: paarweise Δ Zeichen, Δ Wörter (normalisierte Levenshtein-Distanz — bewusst _nicht_ CER/WER, da keine Seite Ground Truth ist), Token-Jaccard, Token-Precision/Recall/F1.
-- `reference`: nur wenn `reference_text` mitgeliefert wurde — echte CER, WER, Token-F1 pro Seite.
+- `reference`: nur wenn `reference_text` mitgeliefert wurde — standardmäßige CER/WER, layout-entspannte R-CER/R-WER, Token-F1 pro Seite.
+
+Referenzmetriken:
+
+- `cer`: standardmäßige Character Error Rate, `Levenshtein(Referenzzeichen, Hypothesenzeichen) / len(Referenzzeichen)`. Diese Metrik ist reihenfolgeabhängig.
+- `wer`: standardmäßige Word Error Rate, `Levenshtein(Referenzwörter, Hypothesenwörter) / len(Referenzwörter)`. Diese Metrik ist reihenfolgeabhängig.
+- `relaxed_cer` (`R-CER` im UI): docread-spezifische layout-entspannte CER. Referenz und Hypothese werden zuerst in Blöcke geteilt: Leerzeilen, dann Zeilen, dann Satzgrenzen. Blöcke werden unabhängig von ihrer Reihenfolge per minimaler Zeichen-Edit-Distanz gematcht; normalisiert wird über die Referenzzeichen innerhalb dieser Blöcke. Block-Trennzeichen wie Zeilenumbrüche sowie beim Split entfernte führende/abschließende Leerzeichen zählen nicht in den entspannten Nenner. Verschobene Blöcke zählen nicht als Löschen+Einfügen, aber Zeichenfehler innerhalb gematchter Blöcke, fehlende Blöcke und zusätzliche Blöcke zählen weiterhin.
+- `relaxed_wer` (`R-WER` im UI): gleiches Block-Matching wie `relaxed_cer`, aber mit Wort-Edit-Distanz und Normalisierung über Referenzwörter.
+- `token_f1`: reihenfolgeunabhängige Token-Precision/Recall/F1 über eindeutige Tokens. Nützlich als grobes Content-Overlap-Signal, aber weniger streng als Edit-Distanz-Metriken.
+
+`R-CER` und `R-WER` sind zusätzliche Diagnosemetriken, kein Ersatz für standardmäßige CER/WER. Sie sind vor allem nützlich, wenn Layout oder Lesereihenfolge abweichen, der OCR-Inhalt aber weitgehend vorhanden ist.
 
 **Azure-Preset** (Browser-Workflow):
 Sind `AZURE_PRESET_LABEL`, `AZURE_PRESET_ENDPOINT` und `AZURE_PRESET_KEY` gesetzt,
@@ -389,7 +404,9 @@ bleibt die Abhängigkeit draußen. Bei Bedarf:
 `/benchmark` (UI) bzw. `POST /api/benchmark` führen N Dateien gegen M Runner
 aus — Runner sind entweder lokale Ollama-Modelle oder externe Engines aus
 dem Compare-Flow. Pro Zeile werden Token-/Zeichen-Anzahl, Latenz und
-(falls Referenztext mitgegeben wurde) CER/WER/Token-F1 berechnet. Aggregat
+(falls Referenztext mitgegeben wurde) CER/WER/R-CER/R-WER/Token-F1 berechnet.
+R-CER und R-WER matchen Textblöcke vor der Edit-Distanz nach Inhalt, sodass
+verschobene Layout-Blöcke nicht als Löschen+Einfügen bestraft werden. Aggregat
 pro Runner liefert Durchschnitt + Standardabweichung.
 
 ### Wie es intern funktioniert
@@ -485,7 +502,9 @@ Engine-spezifische Felder (nur die ausgewählten Engines werden bedient):
       "text_tokens": 192,
       "latency_ms": 4521,
       "cer": 0.082,
+      "relaxed_cer": 0.031,
       "wer": 0.137,
+      "relaxed_wer": 0.044,
       "token_f1": 0.882,
       "avg_confidence": 0.94,
       "warnings": [],
@@ -497,7 +516,8 @@ Engine-spezifische Felder (nur die ausgewählten Engines werden bedient):
       "glm-ocr:latest": {
         "doc_count": 2, "success_count": 2, "failure_count": 0,
         "mean_cer": 0.082, "stdev_cer": 0.041,
-        "mean_wer": 0.137, "mean_token_f1": 0.882,
+        "mean_relaxed_cer": 0.031,
+        "mean_wer": 0.137, "mean_relaxed_wer": 0.044, "mean_token_f1": 0.882,
         "mean_latency_ms": 4231
       }
     }

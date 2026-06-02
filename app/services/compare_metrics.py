@@ -8,13 +8,14 @@ Drei Gruppen, die die UI als Tabs darstellt:
   Levenshtein-Distanzen, Token-Jaccard, Token-Precision/Recall/F1).
   Bewusst NICHT als CER/WER bezeichnet, da diese Begriffe per Definition
   eine Referenz erfordern.
-* Referenz    — echte CER/WER und Token-F1 gegen vom Nutzer gelieferte
-  Ground-Truth, sofern vorhanden.
+* Referenz    — echte CER/WER, layout-entspannte CER/WER und Token-F1
+  gegen vom Nutzer gelieferte Ground-Truth, sofern vorhanden.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import Any
 
 from rapidfuzz.distance import Levenshtein
@@ -23,6 +24,9 @@ from eval.metrics import cer as _cer_against_reference
 from eval.metrics import wer as _wer_against_reference
 
 _WORD_RE = re.compile(r"\w+", re.UNICODE)
+_BLANK_LINE_RE = re.compile(r"(?:\r?\n\s*){2,}")
+_LINE_RE = re.compile(r"\r?\n")
+_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 
 
 def _tokenize(text: str) -> list[str]:
@@ -45,6 +49,148 @@ def _norm_levenshtein(a: list[str] | str, b: list[str] | str) -> float:
         return 0.0
     distance = Levenshtein.distance(a, b)
     return distance / max(len(a), len(b))
+
+
+def _word_tokens_for_distance(text: str) -> list[str]:
+    return text.split()
+
+
+def _char_tokens_for_distance(text: str) -> list[str]:
+    return list(text)
+
+
+def _split_relaxed_blocks(text: str) -> list[str]:
+    stripped = (text or "").strip()
+    if not stripped:
+        return []
+
+    # Prefer explicit document structure first. If the text has no useful
+    # block boundaries, fall back to sentence boundaries before treating it as
+    # one ordered sequence.
+    for pattern in (_BLANK_LINE_RE, _LINE_RE, _SENTENCE_RE):
+        blocks = [part.strip() for part in pattern.split(stripped) if part.strip()]
+        if len(blocks) > 1:
+            return blocks
+    return [stripped]
+
+
+def relaxed_cer(reference_text: str, hypothesis_text: str) -> float:
+    """Character error rate after order-independent block matching.
+
+    This is intentionally not standard CER. It first splits both sides into
+    visible layout/text blocks, then finds the cheapest one-to-one block
+    assignment regardless of order. Moving a whole matched block is therefore
+    free, while changed characters, missing blocks, and extra blocks are still
+    charged as character edits.
+    """
+    return _relaxed_edit_rate(reference_text, hypothesis_text, _char_tokens_for_distance)
+
+
+def relaxed_wer(reference_text: str, hypothesis_text: str) -> float:
+    """Word error rate after order-independent block matching.
+
+    This is intentionally not standard WER. It first splits both sides into
+    visible layout/text blocks, then finds the cheapest one-to-one block
+    assignment regardless of order. Moving a whole matched block is therefore
+    free, while changed words, missing blocks, and extra blocks are still
+    charged as word edits.
+    """
+    return _relaxed_edit_rate(reference_text, hypothesis_text, _word_tokens_for_distance)
+
+
+def _relaxed_edit_rate(
+    reference_text: str,
+    hypothesis_text: str,
+    tokenize_block: Callable[[str], list[str]],
+) -> float:
+    ref_blocks = [tokenize_block(block) for block in _split_relaxed_blocks(reference_text)]
+    hyp_blocks = [tokenize_block(block) for block in _split_relaxed_blocks(hypothesis_text)]
+    ref_blocks = [tokens for tokens in ref_blocks if tokens]
+    hyp_blocks = [tokens for tokens in hyp_blocks if tokens]
+    ref_len = sum(len(tokens) for tokens in ref_blocks)
+    hyp_len = sum(len(tokens) for tokens in hyp_blocks)
+    if ref_len == 0:
+        return 0.0 if hyp_len == 0 else 1.0
+    if not hyp_blocks:
+        return 1.0
+
+    return _block_assignment_cost(ref_blocks, hyp_blocks, ref_len, hyp_len) / ref_len
+
+
+def _block_assignment_cost(
+    ref_blocks: list[list[str]],
+    hyp_blocks: list[list[str]],
+    ref_len: int,
+    hyp_len: int,
+) -> int:
+    size = len(ref_blocks) + len(hyp_blocks)
+    hyp_count = len(hyp_blocks)
+    cost: list[list[int]] = []
+    for ref_tokens in ref_blocks:
+        row = [Levenshtein.distance(ref_tokens, hyp_tokens) for hyp_tokens in hyp_blocks]
+        row.extend([len(ref_tokens)] * len(ref_blocks))
+        cost.append(row)
+    for _hyp_tokens in hyp_blocks:
+        row = [len(other_hyp) for other_hyp in hyp_blocks]
+        row.extend([0] * len(ref_blocks))
+        # Only the matching dummy row can consume this hypothesis at insertion
+        # cost. Other dummy rows get a prohibitively high cost to keep the
+        # assignment meaningful while still square.
+        high_cost = ref_len + hyp_len + 1
+        for idx in range(hyp_count):
+            if idx != len(cost) - len(ref_blocks):
+                row[idx] = high_cost
+        cost.append(row)
+
+    return _hungarian_min_cost(cost, size)
+
+
+def _hungarian_min_cost(cost: list[list[int]], size: int) -> int:
+    """Minimum-cost square assignment for a dense cost matrix."""
+    u = [0] * (size + 1)
+    v = [0] * (size + 1)
+    p = [0] * (size + 1)
+    way = [0] * (size + 1)
+    for i in range(1, size + 1):
+        p[0] = i
+        j0 = 0
+        minv = [10**18] * (size + 1)
+        used = [False] * (size + 1)
+        while True:
+            used[j0] = True
+            i0 = p[j0]
+            delta = 10**18
+            j1 = 0
+            for j in range(1, size + 1):
+                if used[j]:
+                    continue
+                cur = cost[i0 - 1][j - 1] - u[i0] - v[j]
+                if cur < minv[j]:
+                    minv[j] = cur
+                    way[j] = j0
+                if minv[j] < delta:
+                    delta = minv[j]
+                    j1 = j
+            for j in range(size + 1):
+                if used[j]:
+                    u[p[j]] += delta
+                    v[j] -= delta
+                else:
+                    minv[j] -= delta
+            j0 = j1
+            if p[j0] == 0:
+                break
+        while True:
+            j1 = way[j0]
+            p[j0] = p[j1]
+            j0 = j1
+            if j0 == 0:
+                break
+
+    assignment = [0] * (size + 1)
+    for j in range(1, size + 1):
+        assignment[p[j]] = j
+    return sum(cost[i - 1][assignment[i] - 1] for i in range(1, size + 1))
 
 
 def _intrinsic(
@@ -118,7 +264,9 @@ def _reference_side(reference_text: str, hypothesis_text: str) -> dict[str, Any]
     f1 = _safe_div(2 * precision * recall, precision + recall)
     return {
         "cer": _cer_against_reference(reference_text, hypothesis_text),
+        "relaxed_cer": relaxed_cer(reference_text, hypothesis_text),
         "wer": _wer_against_reference(reference_text, hypothesis_text),
+        "relaxed_wer": relaxed_wer(reference_text, hypothesis_text),
         "token_precision": precision,
         "token_recall": recall,
         "token_f1": f1,

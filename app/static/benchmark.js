@@ -296,6 +296,53 @@ async function pollOnce() {
   }
 }
 
+function diffWordKey(word) {
+  return String(word ?? "");
+}
+
+function addCount(map, key) {
+  map.set(key, (map.get(key) || 0) + 1);
+}
+
+function consumeCount(map, key) {
+  const count = map.get(key) || 0;
+  if (count <= 0) return false;
+  if (count === 1) map.delete(key);
+  else map.set(key, count - 1);
+  return true;
+}
+
+function markMovedWords(ops) {
+  const deleted = new Map();
+  const inserted = new Map();
+  ops.forEach((op) => {
+    const key = diffWordKey(op.w);
+    if (!key) return;
+    if (op.t === "del") addCount(deleted, key);
+    else if (op.t === "ins") addCount(inserted, key);
+  });
+
+  const moved = new Map();
+  inserted.forEach((insCount, key) => {
+    const delCount = deleted.get(key) || 0;
+    const movedCount = Math.min(insCount, delCount);
+    if (movedCount > 0) moved.set(key, movedCount);
+  });
+
+  const movedDeletes = new Map(moved);
+  const movedInserts = new Map(moved);
+  return ops.map((op) => {
+    const key = diffWordKey(op.w);
+    if (op.t === "del" && consumeCount(movedDeletes, key)) {
+      return { ...op, t: "move" };
+    }
+    if (op.t === "ins" && consumeCount(movedInserts, key)) {
+      return { ...op, t: "move" };
+    }
+    return op;
+  });
+}
+
 function renderWordDiff(ref, hyp) {
   const rW = ref.trim().split(/\s+/).filter(Boolean);
   const hW = hyp.trim().split(/\s+/).filter(Boolean);
@@ -311,10 +358,18 @@ function renderWordDiff(ref, hyp) {
     else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) { ops.unshift({t: "ins", w: hW[j-1]}); j--; }
     else { ops.unshift({t: "del", w: rW[i-1]}); i--; }
   }
-  return ops.map(({t, w}) => {
+  const movedTitle = escapeHtml(tr("bench_diff_moved_title"));
+  const insertedTitle = escapeHtml(tr("bench_diff_inserted_title"));
+  const deletedTitle = escapeHtml(tr("bench_diff_deleted_title"));
+  return markMovedWords(ops).map(({t, w}) => {
     if (t === "eq") return `<span>${escapeHtml(w)}</span>`;
-    if (t === "ins") return `<span class="bench-diff-ins">${escapeHtml(w)}</span>`;
-    return `<span class="bench-diff-del">${escapeHtml(w)}</span>`;
+    if (t === "move") {
+      return `<span class="bench-diff-move" title="${movedTitle}">${escapeHtml(w)}</span>`;
+    }
+    if (t === "ins") {
+      return `<span class="bench-diff-ins" title="${insertedTitle}">${escapeHtml(w)}</span>`;
+    }
+    return `<span class="bench-diff-del" title="${deletedTitle}">${escapeHtml(w)}</span>`;
   }).join(" ");
 }
 
@@ -348,7 +403,7 @@ function renderJob(job) {
     const hasDetail = row.status === "done" && row.text;
     const expanded = expandedRows.has(idx);
     const toggleBtn = hasDetail
-      ? `<button class="bench-expand-btn" data-row-idx="${idx}" title="Text anzeigen">${expanded ? "▲" : "▼"}</button>`
+      ? `<button class="bench-expand-btn" data-row-idx="${idx}" title="${escapeHtml(expanded ? tr("bench_collapse_text") : tr("bench_expand_text"))}">${expanded ? "▲" : "▼"}</button>`
       : "";
     const mainRow = `
       <tr>
@@ -359,7 +414,9 @@ function renderJob(job) {
         <td>${row.text_chars || 0}</td>
         <td>${fmtMs(row.latency_ms)}</td>
         <td>${fmt(row.cer)}</td>
+        <td>${fmt(row.relaxed_cer)}</td>
         <td>${fmt(row.wer)}</td>
+        <td>${fmt(row.relaxed_wer)}</td>
         <td>${fmt(row.token_f1)}</td>
         <td class="bench-warnings">${escapeHtml(row.error || warnings)}</td>
         <td>${toggleBtn}</td>
@@ -367,16 +424,16 @@ function renderJob(job) {
     if (!hasDetail || !expanded) return [mainRow];
     const diffHtml = row.reference
       ? `<div class="bench-detail-section">
-           <div class="bench-detail-label">Diff (Referenz ↔ Erkannt)</div>
+           <div class="bench-detail-label">${escapeHtml(tr("bench_detail_diff"))}</div>
            <div class="bench-diff-words">${renderWordDiff(row.reference, row.text)}</div>
          </div>`
       : "";
     const detailRow = `
       <tr class="bench-detail-row">
-        <td colspan="11">
+        <td colspan="13">
           <div class="bench-detail">
             <div class="bench-detail-section">
-              <div class="bench-detail-label">Erkannter Text</div>
+              <div class="bench-detail-label">${escapeHtml(tr("bench_detail_text"))}</div>
               <pre class="bench-detail-pre">${escapeHtml(row.text)}</pre>
             </div>
             ${diffHtml}
@@ -404,7 +461,9 @@ function renderJob(job) {
         <dl>
           <dt>Erfolge</dt><dd>${stats.success_count}/${stats.doc_count}</dd>
           <dt>Ø CER</dt><dd>${fmt(stats.mean_cer)}</dd>
+          <dt>Ø R-CER</dt><dd>${fmt(stats.mean_relaxed_cer)}</dd>
           <dt>Ø WER</dt><dd>${fmt(stats.mean_wer)}</dd>
+          <dt>Ø R-WER</dt><dd>${fmt(stats.mean_relaxed_wer)}</dd>
           <dt>Ø F1</dt><dd>${fmt(stats.mean_token_f1)}</dd>
           <dt>Ø Latenz</dt><dd>${fmtMs(stats.mean_latency_ms)}</dd>
         </dl>

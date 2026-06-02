@@ -32,7 +32,7 @@ Most OCR setups force a trade-off: send documents to a cloud API (per-page cost,
 | **Two modes, one install** | **Direct** (`backend=direct`) for fast full-page OCR; **Dev** (`backend=expert`) for layout regions, tables, word boxes, and per-region deskew on difficult scans. |
 | **Real-world scan handling** | Automatic deskew and quarter-turn detection (Tesseract OSD + PSM 2 fine skew, paperless-style) — built for A4 margins, curved book photos, and small content islands on large pages. |
 | **See what the model saw** | Interactive preview with layout overlays, word polygons, markdown output, and per-region tilt metadata. |
-| **Prove accuracy in-house** | Side-by-side compare against Azure, Google Vision, or another docread instance; batch benchmark with CER/WER when you have reference text; optional MLflow tracking. |
+| **Prove accuracy in-house** | Side-by-side compare against Azure, Google Vision, or another docread instance; batch benchmark with standard CER/WER plus layout-relaxed R-CER/R-WER when you have reference text; optional MLflow tracking. |
 | **Drop-in for Azure workflows** | `prebuilt-read` sync/async endpoints compatible with Azure Document Intelligence (formerly Form Recognizer). |
 | **Data sovereignty & privacy** | Self-hosted by design — no mandatory cloud OCR, no telemetry to the project maintainers; suitable for on-premises, private cloud, and air-gapped deployments when you control inference and storage. |
 
@@ -55,7 +55,7 @@ When pages are harder than a flat scan, Dev mode runs a full document pipeline:
 
 ### Evaluation & benchmarking
 
-- **Compare** (`POST /api/compare`) — run docread against Azure, Google Vision, a peer instance, or any HTTP text endpoint; token-level diff and optional CER/WER against ground truth.
+- **Compare** (`POST /api/compare`) — run docread against Azure, Google Vision, a peer instance, or any HTTP text endpoint; token-level diff and optional CER/WER/R-CER/R-WER against ground truth.
 - **Benchmark** (`/benchmark` UI or `POST /api/benchmark`) — batch many files × many models/runners with aggregate metrics and CSV export.
 - **Offline eval** (`eval/run`) — regression suite on a fixed sample set with a manifest of expected text.
 
@@ -346,7 +346,7 @@ Example response:
 
 ## Comparison with External OCR Engine
 
-`POST /api/compare` runs our OCR pipeline in parallel with an external engine and returns a diff, side-by-side metrics, and (optionally) CER/WER against a reference text. `GET /api/compare/engines` lists the supported engines.
+`POST /api/compare` runs our OCR pipeline in parallel with an external engine and returns a diff, side-by-side metrics, and (optionally) CER/WER/R-CER/R-WER against a reference text. `GET /api/compare/engines` lists the supported engines.
 
 **Supported engines** (`engine` form field):
 
@@ -359,7 +359,7 @@ Example response:
 
 **Optional parameters** (engine-independent):
 
-- `reference_text`: Ground-truth text. When set, the response adds a `metrics.reference` block with true CER, WER, and token-F1 for both sides.
+- `reference_text`: Ground-truth text. When set, the response adds a `metrics.reference` block with standard CER/WER, layout-relaxed R-CER/R-WER, and token-F1 for both sides.
 - `expert_*` and `backend`: apply to our own OCR side (see above).
 - `expert_compare_include_detector_only`: additionally includes word polygons from the detector that did not hit a layout token in the diff.
 
@@ -367,7 +367,17 @@ Example response:
 
 - `intrinsic`: tokens, characters, avg confidence, latency per page.
 - `comparison`: pairwise Δ characters, Δ words (normalized Levenshtein distance — deliberately _not_ CER/WER since neither side is ground truth), token Jaccard, token precision/recall/F1.
-- `reference`: only when `reference_text` was provided — true CER, WER, token-F1 per side.
+- `reference`: only when `reference_text` was provided — standard CER/WER, layout-relaxed R-CER/R-WER, token-F1 per side.
+
+Reference metrics:
+
+- `cer`: standard Character Error Rate, `Levenshtein(reference characters, hypothesis characters) / len(reference characters)`. This is order-sensitive.
+- `wer`: standard Word Error Rate, `Levenshtein(reference words, hypothesis words) / len(reference words)`. This is order-sensitive.
+- `relaxed_cer` (`R-CER` in the UI): docread-specific layout-relaxed CER. The reference and hypothesis are split into blocks by blank lines, then lines, then sentence boundaries. Blocks are matched by minimum character edit distance regardless of order, and the result is normalized by the reference characters inside those blocks. Block separator newlines and leading/trailing whitespace stripped during splitting are not part of the relaxed denominator. Moved blocks are not counted as delete+insert, but character mistakes inside a matched block, missing blocks, and extra blocks still count.
+- `relaxed_wer` (`R-WER` in the UI): same block matching as `relaxed_cer`, but with word edit distance and normalization by reference words.
+- `token_f1`: order-free token precision/recall/F1 over unique tokens. Useful as a broad content-overlap signal, but less strict than edit-distance metrics.
+
+`R-CER` and `R-WER` are additional diagnostic metrics, not replacements for standard CER/WER. They are most useful when layout or reading order differs even though the OCR content is largely present.
 
 **Azure preset** (browser workflow):
 When `AZURE_PRESET_LABEL`, `AZURE_PRESET_ENDPOINT`, and `AZURE_PRESET_KEY` are set, the compare form shows a quick button with the label. If the browser sends a request to exactly this endpoint URL without an API key, the server adds the key internally — the secret never leaves the backend.
@@ -381,7 +391,7 @@ AWS Textract is deliberately _not_ included because it requires SigV4 signing, w
 
 ## Batch Benchmark
 
-`/benchmark` (UI) or `POST /api/benchmark` run N files against M runners — runners are either local Ollama models or external engines from the compare flow. Per row, token/character count, latency, and (if reference text was provided) CER/WER/token-F1 are calculated. The aggregate per runner delivers mean + standard deviation.
+`/benchmark` (UI) or `POST /api/benchmark` run N files against M runners — runners are either local Ollama models or external engines from the compare flow. Per row, token/character count, latency, and (if reference text was provided) CER/WER/R-CER/R-WER/token-F1 are calculated. R-CER and R-WER match text blocks by content before edit distance, so moved layout blocks are not penalized as delete+insert. The aggregate per runner delivers mean + standard deviation.
 
 ### How it works internally
 
@@ -472,7 +482,9 @@ Engine-specific fields (only the selected engines are served):
       "text_tokens": 192,
       "latency_ms": 4521,
       "cer": 0.082,
+      "relaxed_cer": 0.031,
       "wer": 0.137,
+      "relaxed_wer": 0.044,
       "token_f1": 0.882,
       "avg_confidence": 0.94,
       "warnings": [],
@@ -484,7 +496,8 @@ Engine-specific fields (only the selected engines are served):
       "glm-ocr:latest": {
         "doc_count": 2, "success_count": 2, "failure_count": 0,
         "mean_cer": 0.082, "stdev_cer": 0.041,
-        "mean_wer": 0.137, "mean_token_f1": 0.882,
+        "mean_relaxed_cer": 0.031,
+        "mean_wer": 0.137, "mean_relaxed_wer": 0.044, "mean_token_f1": 0.882,
         "mean_latency_ms": 4231
       }
     }

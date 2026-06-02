@@ -1728,7 +1728,7 @@ async def metrics_against_reference(
     text: str = Form(...),
     reference_text: str = Form(...),
 ) -> dict[str, object]:
-    """CER/WER/F1 für einen Hypothesentext gegen eine Referenz.
+    """CER/WER/R-CER/R-WER/F1 für einen Hypothesentext gegen eine Referenz.
 
     Wird vom Frontend nach dem OCR-Lauf aufgerufen, wenn ein Referenztext
     vorhanden ist — so füllt sich der Referenz-Tab auch ohne /api/compare.
@@ -2023,7 +2023,9 @@ async def benchmark_csv(
         "text_tokens",
         "latency_ms",
         "cer",
+        "relaxed_cer",
         "wer",
+        "relaxed_wer",
         "token_f1",
         "avg_confidence",
         "warnings",

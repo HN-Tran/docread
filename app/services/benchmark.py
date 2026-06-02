@@ -1,7 +1,7 @@
 """Batch-Benchmarking — N Dateien × M Runner (lokale Modelle + Engines).
 
 Phase 1: in-memory Job-Store, sequenzielles Abarbeiten der Paare. Jeder
-Eintrag bekommt CER/WER/F1, falls eine Referenz mitgeliefert wurde,
+Eintrag bekommt CER/WER/R-CER/R-WER/F1, falls eine Referenz mitgeliefert wurde,
 plus Token-/Zeichen-Count und Latenz. Ein Job entspricht einem POST
 auf ``/api/benchmark``; das Frontend pollt ``GET /api/benchmark/{id}``.
 
@@ -47,7 +47,9 @@ class BenchmarkRow:
     text_tokens: int = 0
     latency_ms: int = 0
     cer: float | None = None
+    relaxed_cer: float | None = None
     wer: float | None = None
+    relaxed_wer: float | None = None
     token_f1: float | None = None
     avg_confidence: float | None = None
     warnings: list[str] = field(default_factory=list)
@@ -268,7 +270,9 @@ async def run_benchmark_job(
                             row.reference = ref
                             ref_block = reference_only(ref, text)["ours"]
                             row.cer = float(ref_block["cer"])
+                            row.relaxed_cer = float(ref_block["relaxed_cer"])
                             row.wer = float(ref_block["wer"])
+                            row.relaxed_wer = float(ref_block["relaxed_wer"])
                             row.token_f1 = float(ref_block["token_f1"])
                         row.status = "done"
                     except Exception as exc:  # noqa: BLE001
@@ -301,7 +305,9 @@ async def run_benchmark_job(
                                 "text_tokens": row.text_tokens,
                                 "latency_ms": row.latency_ms,
                                 "cer": row.cer,
+                                "relaxed_cer": row.relaxed_cer,
                                 "wer": row.wer,
+                                "relaxed_wer": row.relaxed_wer,
                                 "token_f1": row.token_f1,
                                 "avg_confidence": row.avg_confidence,
                             }
@@ -321,7 +327,9 @@ async def run_benchmark_job(
                 sink.log_metrics(
                     {
                         f"{slug}.mean_cer": stats.get("mean_cer"),
+                        f"{slug}.mean_relaxed_cer": stats.get("mean_relaxed_cer"),
                         f"{slug}.mean_wer": stats.get("mean_wer"),
+                        f"{slug}.mean_relaxed_wer": stats.get("mean_relaxed_wer"),
                         f"{slug}.mean_token_f1": stats.get("mean_token_f1"),
                         f"{slug}.mean_latency_ms": stats.get("mean_latency_ms"),
                         f"{slug}.success_count": stats.get("success_count"),
@@ -355,6 +363,8 @@ def _aggregate(rows: list[BenchmarkRow]) -> dict[str, Any]:
         successes = [r for r in group if r.status == "done"]
         cers = [r.cer for r in successes if r.cer is not None]
         wers = [r.wer for r in successes if r.wer is not None]
+        relaxed_cers = [r.relaxed_cer for r in successes if r.relaxed_cer is not None]
+        relaxed_wers = [r.relaxed_wer for r in successes if r.relaxed_wer is not None]
         f1s = [r.token_f1 for r in successes if r.token_f1 is not None]
         latencies = [r.latency_ms for r in successes]
         out["per_runner"][label] = {
@@ -363,7 +373,9 @@ def _aggregate(rows: list[BenchmarkRow]) -> dict[str, Any]:
             "failure_count": len(group) - len(successes),
             "mean_cer": statistics.fmean(cers) if cers else None,
             "stdev_cer": statistics.stdev(cers) if len(cers) > 1 else None,
+            "mean_relaxed_cer": statistics.fmean(relaxed_cers) if relaxed_cers else None,
             "mean_wer": statistics.fmean(wers) if wers else None,
+            "mean_relaxed_wer": statistics.fmean(relaxed_wers) if relaxed_wers else None,
             "mean_token_f1": statistics.fmean(f1s) if f1s else None,
             "mean_latency_ms": statistics.fmean(latencies) if latencies else None,
         }
