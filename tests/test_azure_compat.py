@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from app.api.routes import (
+    _scale_polygon_to_page_pixels,
     compat_analyze,
     compat_authentication_renew,
     compat_get_analyze_result,
@@ -227,6 +228,23 @@ def _pipeline() -> OCRBackendRouter:
     return cast(OCRBackendRouter, FakeBackendRouter())
 
 
+def test_scale_polygon_to_page_pixels_uses_page_resolution() -> None:
+    polygon = [100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0]
+    scaled = _scale_polygon_to_page_pixels(polygon, page_width=2480, page_height=3508)
+    assert scaled == pytest.approx(
+        [
+            248.0,
+            701.6,
+            744.0,
+            1403.2,
+            1240.0,
+            2104.8,
+            1736.0,
+            2806.4,
+        ]
+    )
+
+
 def test_compat_service_ready_payload() -> None:
     response = asyncio.run(compat_service_ready())
     payload = _json_body(response)
@@ -275,52 +293,26 @@ def test_sync_analyze_returns_azure_shape_and_filters_pages() -> None:
     assert payload["analyzeResult"]["modelId"] == "prebuilt-read"
     assert payload["analyzeResult"]["stringIndexType"] == "unicodeCodePoint"
     assert payload["analyzeResult"]["content"] == "page two"
-    assert payload["analyzeResult"]["pages"] == [
-        {
-            "pageNumber": 2,
-            "angle": 0.0,
-            "width": 1000,
-            "height": 1200,
-            "unit": "pixel",
-            "words": [
-                {
-                    "content": "page",
-                    "span": {"offset": 0, "length": 4},
-                    "confidence": 0.87,
-                    "polygon": [10.0, 10.0, 29.0, 11.0, 31.0, 49.0, 12.0, 48.0],
-                },
-                {
-                    "content": "two",
-                    "span": {"offset": 5, "length": 3},
-                    "confidence": 0.87,
-                    "polygon": [33.75, 11.25, 48.0, 12.0, 50.0, 50.0, 35.75, 49.25],
-                },
-            ],
-            "lines": [
-                {
-                    "content": "page two",
-                    "spans": [{"offset": 0, "length": 8}],
-                    "confidence": 0.87,
-                    "polygon": [10.0, 10.0, 48.0, 12.0, 50.0, 50.0, 12.0, 48.0],
-                }
-            ],
-            "spans": [{"offset": 0, "length": 8}],
-            "kind": "document",
-            "content": "page two",
-        }
-    ]
-    assert payload["analyzeResult"]["paragraphs"] == [
-        {
-            "content": "page two",
-            "spans": [{"offset": 0, "length": 8}],
-            "boundingRegions": [
-                {
-                    "pageNumber": 2,
-                    "polygon": [10.0, 10.0, 48.0, 12.0, 50.0, 50.0, 12.0, 48.0],
-                }
-            ],
-        }
-    ]
+    page = payload["analyzeResult"]["pages"][0]
+    assert page["pageNumber"] == 2
+    assert page["width"] == 1000
+    assert page["height"] == 1200
+    assert page["words"][0]["content"] == "page"
+    assert page["words"][0]["polygon"] == pytest.approx(
+        [10.0, 12.0, 29.0, 13.2, 31.0, 58.8, 12.0, 57.6]
+    )
+    assert page["words"][1]["polygon"] == pytest.approx(
+        [33.75, 13.5, 48.0, 14.4, 50.0, 60.0, 35.75, 59.1]
+    )
+    assert page["lines"][0]["polygon"] == pytest.approx(
+        [10.0, 12.0, 48.0, 14.4, 50.0, 60.0, 12.0, 57.6]
+    )
+    paragraph = payload["analyzeResult"]["paragraphs"][0]
+    assert paragraph["content"] == "page two"
+    assert paragraph["boundingRegions"][0]["pageNumber"] == 2
+    assert paragraph["boundingRegions"][0]["polygon"] == pytest.approx(
+        [10.0, 12.0, 48.0, 14.4, 50.0, 60.0, 12.0, 57.6]
+    )
 
 
 def test_sync_analyze_without_layout_keeps_word_shape_stable() -> None:

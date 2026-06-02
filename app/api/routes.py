@@ -465,6 +465,79 @@ def _empty_polygon() -> list[float]:
     return [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 
+def _page_pixel_size(page_info: object) -> tuple[float, float]:
+    info = page_info if isinstance(page_info, dict) else {}
+    width_raw = info.get("width")
+    height_raw = info.get("height")
+    width = float(width_raw) if isinstance(width_raw, (int, float)) else 0.0
+    height = float(height_raw) if isinstance(height_raw, (int, float)) else 0.0
+    if width <= 0 or height <= 0:
+        return 1000.0, 1000.0
+    return width, height
+
+
+def _page_sizes_by_number(
+    page_infos: list[dict[str, object]] | None,
+) -> dict[int, tuple[float, float]]:
+    sizes: dict[int, tuple[float, float]] = {}
+    if not page_infos:
+        return sizes
+    for page_index, page_info in enumerate(page_infos, start=1):
+        if not isinstance(page_info, dict):
+            continue
+        page_number = _page_number(page_info.get("page_number"), page_index)
+        sizes[page_number] = _page_pixel_size(page_info)
+    return sizes
+
+
+def _scale_polygon_to_page_pixels(
+    polygon: list[float],
+    *,
+    page_width: float,
+    page_height: float,
+) -> list[float]:
+    """Map internal 0-1000 polygon coords to page pixel space for Azure clients."""
+    if len(polygon) < 8 or page_width <= 0 or page_height <= 0:
+        return polygon
+    return [
+        float(value) / 1000.0 * (page_width if index % 2 == 0 else page_height)
+        for index, value in enumerate(polygon)
+    ]
+
+
+def _scale_polygon_field(
+    entry: dict[str, object],
+    *,
+    page_width: float,
+    page_height: float,
+) -> None:
+    polygon = entry.get("polygon")
+    if not isinstance(polygon, list) or len(polygon) < 8:
+        return
+    try:
+        floats = [float(value) for value in polygon]
+    except (TypeError, ValueError):
+        return
+    entry["polygon"] = _scale_polygon_to_page_pixels(
+        floats,
+        page_width=page_width,
+        page_height=page_height,
+    )
+
+
+def _scale_bounding_regions(
+    regions: object,
+    *,
+    page_width: float,
+    page_height: float,
+) -> None:
+    if not isinstance(regions, list):
+        return
+    for region in regions:
+        if isinstance(region, dict):
+            _scale_polygon_field(region, page_width=page_width, page_height=page_height)
+
+
 def _slice_line_rect(
     region_rect: tuple[float, float, float, float] | None,
     *,
@@ -937,6 +1010,7 @@ def _build_document_projection(
     layout: list[dict[str, object]] | None,
     content: str,
     string_index_type: str,
+    azure_pixel_coordinates: bool = False,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     page_count = max(len(page_infos or []), len(page_texts or []), len(layout or []))
     if page_count == 0:
@@ -1033,15 +1107,33 @@ def _build_document_projection(
             )
             page_entry["lines"] = lines
             page_entry["words"] = words
-            paragraphs.extend(
-                _build_paragraph_entries_for_page(
-                    page_number=page_number,
-                    page_content=page_content,
-                    page_offset=page_offset,
-                    page_layout=page_layout,
-                    string_index_type=string_index_type,
-                )
+            page_paragraphs = _build_paragraph_entries_for_page(
+                page_number=page_number,
+                page_content=page_content,
+                page_offset=page_offset,
+                page_layout=page_layout,
+                string_index_type=string_index_type,
             )
+            if azure_pixel_coordinates:
+                page_width, page_height = _page_pixel_size(page_info)
+                for entry in words:
+                    if isinstance(entry, dict):
+                        _scale_polygon_field(
+                            entry, page_width=page_width, page_height=page_height
+                        )
+                for entry in lines:
+                    if isinstance(entry, dict):
+                        _scale_polygon_field(
+                            entry, page_width=page_width, page_height=page_height
+                        )
+                for entry in page_paragraphs:
+                    if isinstance(entry, dict):
+                        _scale_bounding_regions(
+                            entry.get("boundingRegions"),
+                            page_width=page_width,
+                            page_height=page_height,
+                        )
+            paragraphs.extend(page_paragraphs)
         else:
             page_entry["lines"] = []
             page_entry["words"] = []
@@ -1053,10 +1145,14 @@ def _build_document_projection(
 
 def _build_tables(
     layout: list[dict[str, object]] | None,
+    *,
+    page_infos: list[dict[str, object]] | None = None,
+    azure_pixel_coordinates: bool = False,
 ) -> list[dict[str, object]]:
     """Extract Azure-compatible ``tables`` array from layout regions that have cells."""
     if not layout:
         return []
+    page_sizes = _page_sizes_by_number(page_infos) if azure_pixel_coordinates else {}
     tables: list[dict[str, object]] = []
     # Layout is a list of per-page dicts, each with a "regions" key.
     all_regions: list[tuple[int, dict[str, object]]] = []
@@ -1114,6 +1210,13 @@ def _build_tables(
             }
             polygon = _coerce_polygon(cell.get("polygon")) or _bbox_to_polygon(cell.get("bbox_2d"))
             if polygon is not None:
+                page_width, page_height = page_sizes.get(page_number, (1000.0, 1000.0))
+                if azure_pixel_coordinates:
+                    polygon = _scale_polygon_to_page_pixels(
+                        polygon,
+                        page_width=page_width,
+                        page_height=page_height,
+                    )
                 azure_cell["boundingRegions"] = [{"pageNumber": page_number, "polygon": polygon}]
             else:
                 azure_cell["boundingRegions"] = []
@@ -1131,6 +1234,13 @@ def _build_tables(
             region.get("bbox_2d")
         )
         if table_polygon is not None:
+            page_width, page_height = page_sizes.get(page_number, (1000.0, 1000.0))
+            if azure_pixel_coordinates:
+                table_polygon = _scale_polygon_to_page_pixels(
+                    table_polygon,
+                    page_width=page_width,
+                    page_height=page_height,
+                )
             tables[-1]["boundingRegions"] = [{"pageNumber": page_number, "polygon": table_polygon}]
     return tables
 
@@ -1144,6 +1254,7 @@ def _build_analyze_result(
     page_texts: list[str] | None,
     api_version: str = API_VERSION,
     string_index_type: str = STRING_INDEX_TYPE,
+    azure_pixel_coordinates: bool = False,
 ) -> dict[str, object]:
     pages, paragraphs = _build_document_projection(
         page_infos=page_infos,
@@ -1151,8 +1262,13 @@ def _build_analyze_result(
         layout=layout,
         content=content,
         string_index_type=string_index_type,
+        azure_pixel_coordinates=azure_pixel_coordinates,
     )
-    tables = _build_tables(layout)
+    tables = _build_tables(
+        layout,
+        page_infos=page_infos,
+        azure_pixel_coordinates=azure_pixel_coordinates,
+    )
     return {
         "apiVersion": api_version,
         "modelId": model_id,
@@ -1551,6 +1667,7 @@ def _build_compat_response_payload(
             page_texts=filtered_page_texts,
             api_version=AZURE_API_VERSION,
             string_index_type=string_index_type,
+            azure_pixel_coordinates=True,
         ),
     }
 
