@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from app.api.routes import (
+    _build_analyze_result,
     _scale_polygon_to_page_pixels,
     compat_analyze,
     compat_authentication_renew,
@@ -22,6 +23,7 @@ from app.api.routes import (
 from app.config import get_settings
 from app.services.analyze_operation_store import AnalyzeOperationStore
 from app.services.backend_router import OCRBackendRouter
+from app.services.page_number import footer_band_words
 
 
 def _json_body(response: Any) -> Any:
@@ -477,3 +479,115 @@ def test_compat_service_ready_uses_configured_read_model(
     response = asyncio.run(compat_service_ready())
     payload = _json_body(response)
     assert payload["service"] == "prebuilt-layout"
+
+
+def _footer_word_polys() -> list[dict[str, object]]:
+    return [
+        {
+            "content": "Seite",
+            "confidence": 0.95,
+            "polygon": [100.0, 910.0, 150.0, 910.0, 150.0, 930.0, 100.0, 930.0],
+        },
+        {
+            "content": "1",
+            "confidence": 0.95,
+            "polygon": [160.0, 910.0, 180.0, 910.0, 180.0, 930.0, 160.0, 930.0],
+        },
+        {
+            "content": "von",
+            "confidence": 0.95,
+            "polygon": [190.0, 910.0, 230.0, 910.0, 230.0, 930.0, 190.0, 930.0],
+        },
+        {
+            "content": "5",
+            "confidence": 0.95,
+            "polygon": [240.0, 910.0, 260.0, 910.0, 260.0, 930.0, 240.0, 930.0],
+        },
+    ]
+
+
+def test_build_analyze_result_layout_model_tags_page_number_role(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AZURE_COMPAT_LAYOUT_MODEL", "prebuilt-read")
+    monkeypatch.setenv("AZURE_COMPAT_READ_MODEL", "prebuilt-layout")
+    page_text = "Rechnung Nr. 4711\nSumme 10,00\nSeite 1 von 5"
+    layout = [
+        {
+            "page_number": 1,
+            "regions": [
+                {
+                    "index": 0,
+                    "label": "text_block",
+                    "content": "Rechnung Nr. 4711",
+                    "bbox_2d": [50.0, 50.0, 900.0, 120.0],
+                },
+                {
+                    "index": 1,
+                    "label": "text_block",
+                    "content": "Summe 10,00",
+                    "bbox_2d": [50.0, 400.0, 900.0, 500.0],
+                },
+                {
+                    "index": 2,
+                    "label": "text_block",
+                    "content": "Seite 1 von 5",
+                    "bbox_2d": [50.0, 900.0, 900.0, 980.0],
+                },
+            ],
+            "word_polys": _footer_word_polys(),
+        }
+    ]
+    result = _build_analyze_result(
+        content=page_text,
+        model_id="prebuilt-read",
+        layout=layout,
+        page_infos=[
+            {
+                "page_number": 1,
+                "width": 1000,
+                "height": 1200,
+                "unit": "pixel",
+                "angle": 0.0,
+            }
+        ],
+        page_texts=[page_text],
+        azure_pixel_coordinates=True,
+    )
+    paragraphs = cast(list[object], result["paragraphs"])
+    roles = [p.get("role") for p in paragraphs if isinstance(p, dict)]
+    assert "pageNumber" in roles
+    page_number_paragraphs = [
+        p for p in paragraphs if isinstance(p, dict) and p.get("role") == "pageNumber"
+    ]
+    assert page_number_paragraphs[0]["content"] == "Seite 1 von 5"
+
+    pages = cast(list[dict[str, object]], result["pages"])
+    page = pages[0]
+    words = cast(list[dict[str, object]], page["words"])
+    assert words
+    for word in words:
+        polygon = word.get("polygon")
+        assert isinstance(polygon, list)
+        assert max(cast(list[float], polygon)[1::2]) > 0.0
+    footer = footer_band_words(words, page_height=1200.0)
+    footer_text = " ".join(str(w.get("content") or "") for w in footer)
+    assert "Seite" in footer_text
+    assert "5" in footer_text
+
+
+def test_build_analyze_result_read_model_omits_paragraph_roles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AZURE_COMPAT_LAYOUT_MODEL", "prebuilt-read")
+    monkeypatch.setenv("AZURE_COMPAT_READ_MODEL", "prebuilt-layout")
+    page_text = "Seite 1 von 5"
+    result = _build_analyze_result(
+        content=page_text,
+        model_id="prebuilt-layout",
+        layout=None,
+        page_infos=[{"page_number": 1, "width": 1000, "height": 1200, "unit": "pixel"}],
+        page_texts=[page_text],
+    )
+    paragraphs = cast(list[object], result["paragraphs"])
+    assert all("role" not in p for p in paragraphs if isinstance(p, dict))

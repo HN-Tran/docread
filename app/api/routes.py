@@ -63,6 +63,11 @@ from app.services.inference import InferenceError, VisionLlmClient
 from app.services.inference.registry import VisionClientRegistry
 from app.services.mlflow_sink import MlflowSink
 from app.services.ocr_pipeline import OCRResult
+from app.services.page_number import (
+    assign_paragraph_role,
+    find_page_number_in_words,
+    vertical_band_from_bbox,
+)
 from app.services.safe_http import create_safe_async_client
 from app.services.warmed_example_store import WarmedExample, WarmedExampleStore
 
@@ -941,6 +946,24 @@ def _build_line_and_word_entries(
     return lines, words
 
 
+def _apply_paragraph_role(
+    paragraph: dict[str, object],
+    *,
+    content: str,
+    region: dict[str, object] | None,
+    emit_roles: bool,
+) -> None:
+    band = None
+    if region is not None:
+        band = vertical_band_from_bbox(
+            region.get("bbox_2d"),
+            polygon=region.get("polygon"),
+        )
+    role = assign_paragraph_role(content=content, band=band, emit_roles=emit_roles)
+    if role is not None:
+        paragraph["role"] = role
+
+
 def _build_paragraph_entries_for_page(
     *,
     page_number: int,
@@ -948,6 +971,7 @@ def _build_paragraph_entries_for_page(
     page_offset: int,
     page_layout: object,
     string_index_type: str,
+    emit_roles: bool = False,
 ) -> list[dict[str, object]]:
     paragraphs: list[dict[str, object]] = []
     search_cursor = 0
@@ -982,6 +1006,12 @@ def _build_paragraph_entries_for_page(
                         "polygon": polygon,
                     }
                 ]
+            _apply_paragraph_role(
+                paragraph,
+                content=region_content,
+                region=region,
+                emit_roles=emit_roles,
+            )
             paragraphs.append(paragraph)
         return paragraphs
 
@@ -993,13 +1023,18 @@ def _build_paragraph_entries_for_page(
             string_index_type=string_index_type,
             search_cursor=search_cursor,
         )
-        paragraphs.append(
-            {
-                "content": paragraph_text,
-                "spans": [paragraph_span],
-                "boundingRegions": [],
-            }
+        paragraph_entry: dict[str, object] = {
+            "content": paragraph_text,
+            "spans": [paragraph_span],
+            "boundingRegions": [],
+        }
+        _apply_paragraph_role(
+            paragraph_entry,
+            content=paragraph_text,
+            region=None,
+            emit_roles=emit_roles,
         )
+        paragraphs.append(paragraph_entry)
     return paragraphs
 
 
@@ -1011,6 +1046,7 @@ def _build_document_projection(
     content: str,
     string_index_type: str,
     azure_pixel_coordinates: bool = False,
+    emit_roles: bool = False,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     page_count = max(len(page_infos or []), len(page_texts or []), len(layout or []))
     if page_count == 0:
@@ -1113,19 +1149,36 @@ def _build_document_projection(
                 page_offset=page_offset,
                 page_layout=page_layout,
                 string_index_type=string_index_type,
+                emit_roles=emit_roles,
             )
+            if emit_roles and isinstance(page_layout, dict):
+                word_polys = page_layout.get("word_polys")
+                has_word_polys = isinstance(word_polys, list) and len(word_polys) > 0
+                if not has_word_polys:
+                    logging.getLogger(__name__).debug(
+                        "compat layout page %s: no word_polys; footer word geometry degraded",
+                        page_number,
+                    )
+                else:
+                    page_match = find_page_number_in_words(
+                        [w for w in words if isinstance(w, dict)]
+                    )
+                    if page_match is not None:
+                        logging.getLogger(__name__).debug(
+                            "compat layout page %s: detected page number x=%s y=%s tier=%s",
+                            page_number,
+                            page_match.x,
+                            page_match.y,
+                            page_match.tier,
+                        )
             if azure_pixel_coordinates:
                 page_width, page_height = _page_pixel_size(page_info)
                 for entry in words:
                     if isinstance(entry, dict):
-                        _scale_polygon_field(
-                            entry, page_width=page_width, page_height=page_height
-                        )
+                        _scale_polygon_field(entry, page_width=page_width, page_height=page_height)
                 for entry in lines:
                     if isinstance(entry, dict):
-                        _scale_polygon_field(
-                            entry, page_width=page_width, page_height=page_height
-                        )
+                        _scale_polygon_field(entry, page_width=page_width, page_height=page_height)
                 for entry in page_paragraphs:
                     if isinstance(entry, dict):
                         _scale_bounding_regions(
@@ -1256,6 +1309,7 @@ def _build_analyze_result(
     string_index_type: str = STRING_INDEX_TYPE,
     azure_pixel_coordinates: bool = False,
 ) -> dict[str, object]:
+    emit_roles = _is_azure_compat_layout_model(model_id)
     pages, paragraphs = _build_document_projection(
         page_infos=page_infos,
         page_texts=page_texts,
@@ -1263,6 +1317,7 @@ def _build_analyze_result(
         content=content,
         string_index_type=string_index_type,
         azure_pixel_coordinates=azure_pixel_coordinates,
+        emit_roles=emit_roles,
     )
     tables = _build_tables(
         layout,
