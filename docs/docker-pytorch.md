@@ -16,7 +16,11 @@ PyTorch has **no Vulkan** build. Vulkan is only for the [vision LLM (llama.cpp)]
 docker compose up --build
 ```
 
-Includes the optional `paddle` extra for PaddleOCR in Docker.
+All three runtime Dockerfiles install the `paddle` and `osd` extras and bake in
+`FLAGS_use_mkldnn=0`, `PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True`, and
+`OCR_WORD_DETECTOR=paddleocr` so a plain `docker build` / `docker run` (no Compose
+`-e` flags) matches the PaddleOCR settings from `docker-compose.yml`. Compose still
+overrides `OCR_WORD_DETECTOR` to `doctr` unless `.env` says otherwise.
 
 ## NVIDIA
 

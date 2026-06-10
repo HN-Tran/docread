@@ -1172,9 +1172,7 @@ def _build_document_projection(
                 page_layout=page_layout,
                 string_index_type=string_index_type,
             )
-            words = normalize_glued_counter_words(
-                [w for w in words if isinstance(w, dict)]
-            )
+            words = normalize_glued_counter_words([w for w in words if isinstance(w, dict)])
             _relocate_word_spans(
                 words,
                 page_content=page_content,
@@ -1370,9 +1368,7 @@ def _build_analyze_result(
         if isinstance(page, dict) and str(page.get("content") or "").strip()
     ]
     canonical_content = (
-        "\n\n".join(page_contents)
-        if page_contents
-        else canonicalize_page_counter_text(content)
+        "\n\n".join(page_contents) if page_contents else canonicalize_page_counter_text(content)
     )
     return {
         "apiVersion": api_version,

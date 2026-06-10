@@ -26,6 +26,10 @@ COPY eval ./eval
 COPY tests ./tests
 COPY data ./data
 
+ENV INSTALL_EXTRA=paddle,osd \
+    FLAGS_use_mkldnn=0 \
+    PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True \
+    OCR_WORD_DETECTOR=paddleocr
 RUN python3 /tmp/docker_install_app_deps.py
 
 RUN useradd -r -u 101 -m appuser && \

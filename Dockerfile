@@ -32,7 +32,10 @@ RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
       --index-url https://download.pytorch.org/whl/cpu \
       --extra-index-url https://pypi.org/simple \
       torch torchvision
-ENV INSTALL_EXTRA=paddle,osd
+ENV INSTALL_EXTRA=paddle,osd \
+    FLAGS_use_mkldnn=0 \
+    PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True \
+    OCR_WORD_DETECTOR=paddleocr
 RUN python3 /tmp/docker_install_app_deps.py
 
 RUN useradd -r -u 101 -m appuser && \
