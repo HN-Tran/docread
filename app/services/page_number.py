@@ -49,6 +49,10 @@ _RE_MEDIUM = re.compile(
     re.IGNORECASE,
 )
 _RE_LOW = re.compile(rf"\b{_NUM}\s*{_SEP}\s*{_NUM}\b")
+_RE_COUNTER_FRAGMENT = re.compile(
+    rf"(?:(?:{_PAGE_LABEL})\s*)?{_NUM}\s*{_SEP}\s*{_NUM}",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -230,6 +234,137 @@ def find_page_number_in_words(
     footer_words.sort(key=lambda item: (item[0], item[1]))
     joined = " ".join(word for _, _, word in footer_words)
     return classify_page_number(joined)
+
+
+def _format_counter_fragment(fragment: str, x: int, y: int) -> str:
+    stripped = fragment.strip()
+    label_match = re.match(rf"(?i)^({_PAGE_LABEL})\s*", stripped)
+    if re.search(r"(?i)\bvon\b", stripped):
+        sep = " von "
+    elif re.search(r"(?i)\bof\b", stripped):
+        sep = " of "
+    elif "/" in stripped:
+        sep = "/"
+    else:
+        sep = " von "
+
+    if label_match:
+        label = label_match.group(1)
+        if re.match(r"(?i)seite", label):
+            label = "Seite"
+        elif re.match(r"(?i)page", label):
+            label = "Page"
+        if sep == "/":
+            return f"{label} {x}/{y}"
+        return f"{label} {x}{sep}{y}"
+    if sep == "/":
+        return f"{x}/{y}"
+    return f"{x}{sep}{y}"
+
+
+def canonicalize_page_counter_text(text: str) -> str:
+    """Rewrite glued page counters to spaced form (e.g. ``2von2`` → ``2 von 2``)."""
+    if not text.strip():
+        return text
+
+    def repl(match: re.Match[str]) -> str:
+        fragment = match.group(0)
+        if _is_date_like_remainder(text, match.end()):
+            return fragment
+        pair = _parse_pair(fragment)
+        if pair is None:
+            return fragment
+        return _format_counter_fragment(fragment, pair[0], pair[1])
+
+    return _RE_COUNTER_FRAGMENT.sub(repl, text)
+
+
+def split_glued_counter_token(token: str) -> list[str] | None:
+    """Split a single glued counter token (e.g. ``2von2``) into word-sized parts."""
+    stripped = token.strip()
+    if not stripped or " " in stripped:
+        return None
+    pair = _parse_pair(stripped)
+    if pair is None:
+        return None
+    if re.search(r"(?i)von", stripped):
+        return [str(pair[0]), "von", str(pair[1])]
+    if re.search(r"(?i)of", stripped):
+        return [str(pair[0]), "of", str(pair[1])]
+    if "/" in stripped:
+        return [str(pair[0]), "/", str(pair[1])]
+    if "–" in stripped:
+        return [str(pair[0]), "–", str(pair[1])]
+    if "-" in stripped:
+        return [str(pair[0]), "-", str(pair[1])]
+    return [str(pair[0]), "von", str(pair[1])]
+
+
+def _split_polygon_by_parts(polygon: object, parts: list[str]) -> list[list[float]]:
+    poly = _coerce_polygon_internal(polygon)
+    if poly is None or not parts:
+        return []
+    xs = poly[0::2]
+    ys = poly[1::2]
+    x_min, x_max = min(xs), max(xs)
+    y_min, y_max = min(ys), max(ys)
+    widths = [max(len(part), 1) for part in parts]
+    total = float(sum(widths))
+    out: list[list[float]] = []
+    cursor = x_min
+    full_width = max(x_max - x_min, 0.0)
+    for _part, width in zip(parts, widths, strict=False):
+        part_width = full_width * (width / total) if full_width > 0 else 0.0
+        x1 = cursor
+        x2 = cursor + part_width
+        out.append([x1, y_min, x2, y_min, x2, y_max, x1, y_max])
+        cursor = x2
+    return out
+
+
+def normalize_glued_counter_words(
+    words: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Split glued page-counter tokens into separate Azure ``words`` entries.
+
+    Applies anywhere on the page (footer, header, or generic text regions), not
+    only the footer band — layout may label the counter as a normal text block.
+    """
+    normalized: list[dict[str, object]] = []
+    for entry in words:
+        if not isinstance(entry, dict):
+            continue
+        content = str(entry.get("content") or "").strip()
+        polygon = entry.get("polygon")
+        parts = split_glued_counter_token(content)
+        if parts is None or len(parts) < 2:
+            normalized.append(entry)
+            continue
+        part_polys = _split_polygon_by_parts(polygon, parts)
+        if len(part_polys) != len(parts):
+            normalized.append(entry)
+            continue
+        confidence = entry.get("confidence", 0.0)
+        for part, part_poly in zip(parts, part_polys, strict=False):
+            normalized.append(
+                {
+                    "content": part,
+                    "confidence": confidence,
+                    "polygon": part_poly,
+                }
+            )
+    return normalized
+
+
+def normalize_footer_counter_words(
+    words: list[dict[str, object]],
+    *,
+    footer_y_min: float = FOOTER_Y_MIN,
+    coord_max: float = 1000.0,
+) -> list[dict[str, object]]:
+    """Deprecated alias for :func:`normalize_glued_counter_words`."""
+    del footer_y_min, coord_max
+    return normalize_glued_counter_words(words)
 
 
 def footer_band_words(

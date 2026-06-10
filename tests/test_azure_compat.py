@@ -576,6 +576,71 @@ def test_build_analyze_result_layout_model_tags_page_number_role(
     assert "5" in footer_text
 
 
+def test_build_analyze_result_splits_glued_footer_counter_words(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AZURE_COMPAT_LAYOUT_MODEL", "prebuilt-read")
+    monkeypatch.setenv("AZURE_COMPAT_READ_MODEL", "prebuilt-layout")
+    raw_page_text = "Rechnung Nr. 4711\nSeite 2von2"
+    layout = [
+        {
+            "page_number": 1,
+            "regions": [
+                {
+                    "index": 0,
+                    "label": "text_block",
+                    "content": "Rechnung Nr. 4711",
+                    "bbox_2d": [50.0, 50.0, 900.0, 120.0],
+                },
+                {
+                    "index": 1,
+                    "label": "text_block",
+                    "content": "Seite 2von2",
+                    "bbox_2d": [50.0, 900.0, 900.0, 980.0],
+                },
+            ],
+            "word_polys": [
+                {
+                    "content": "Seite",
+                    "confidence": 0.95,
+                    "polygon": [100.0, 910.0, 150.0, 910.0, 150.0, 930.0, 100.0, 930.0],
+                },
+                {
+                    "content": "2von2",
+                    "confidence": 0.95,
+                    "polygon": [160.0, 910.0, 280.0, 910.0, 280.0, 930.0, 160.0, 930.0],
+                },
+            ],
+        }
+    ]
+    result = _build_analyze_result(
+        content=raw_page_text,
+        model_id="prebuilt-read",
+        layout=layout,
+        page_infos=[
+            {
+                "page_number": 1,
+                "width": 1000,
+                "height": 1200,
+                "unit": "pixel",
+                "angle": 0.0,
+            }
+        ],
+        page_texts=[raw_page_text],
+        azure_pixel_coordinates=True,
+    )
+    assert result["content"] == "Rechnung Nr. 4711\nSeite 2 von 2"
+    pages = cast(list[dict[str, object]], result["pages"])
+    words = cast(list[dict[str, object]], pages[0]["words"])
+    footer = footer_band_words(words, page_height=1200.0)
+    footer_contents = [str(w.get("content") or "") for w in footer]
+    assert footer_contents == ["Seite", "2", "von", "2"]
+    paragraphs = cast(list[dict[str, object]], result["paragraphs"])
+    footer_paragraph = paragraphs[-1]
+    assert footer_paragraph["content"] == "Seite 2 von 2"
+    assert footer_paragraph.get("role") == "pageNumber"
+
+
 def test_build_analyze_result_read_model_omits_paragraph_roles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

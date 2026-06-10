@@ -65,7 +65,9 @@ from app.services.mlflow_sink import MlflowSink
 from app.services.ocr_pipeline import OCRResult
 from app.services.page_number import (
     assign_paragraph_role,
+    canonicalize_page_counter_text,
     find_page_number_in_words,
+    normalize_glued_counter_words,
     vertical_band_from_bbox,
 )
 from app.services.safe_http import create_safe_async_client
@@ -736,6 +738,30 @@ def _locate_span_in_page_content(
     )
 
 
+def _relocate_word_spans(
+    words: list[dict[str, object]],
+    *,
+    page_content: str,
+    page_offset: int,
+    string_index_type: str,
+) -> None:
+    cursor = 0
+    for entry in words:
+        if not isinstance(entry, dict):
+            continue
+        content = str(entry.get("content") or "").strip()
+        if not content:
+            continue
+        span, cursor = _locate_span_in_page_content(
+            page_content=page_content,
+            fragment=content,
+            page_offset=page_offset,
+            string_index_type=string_index_type,
+            search_cursor=cursor,
+        )
+        entry["span"] = span
+
+
 def _words_from_detector_polys(
     *,
     detector_words: list[object],
@@ -981,7 +1007,9 @@ def _build_paragraph_entries_for_page(
         for region in regions:
             if not isinstance(region, dict):
                 continue
-            region_content = str(region.get("content") or "").strip()
+            region_content = canonicalize_page_counter_text(
+                str(region.get("content") or "").strip()
+            )
             if not region_content:
                 continue
             paragraph_span, search_cursor = _locate_span_in_page_content(
@@ -1089,7 +1117,8 @@ def _build_document_projection(
             if page_index - 1 < len(page_texts or [])
             else _page_content_from_layout(page_layout)
         )
-        page_text = str(raw_page_text or "").strip()
+        raw_page_text = str(raw_page_text or "").strip()
+        page_text = canonicalize_page_counter_text(raw_page_text)
         page_number = _page_number(
             page_info.get("page_number") if isinstance(page_info, dict) else None,
             page_index,
@@ -1101,6 +1130,7 @@ def _build_document_projection(
                 "page_info": page_info,
                 "page_layout": page_layout,
                 "page_content": page_text,
+                "raw_page_content": raw_page_text,
             }
         )
 
@@ -1124,6 +1154,7 @@ def _build_document_projection(
         page_info = cast(dict[str, object], page_context["page_info"])
         page_layout = cast("dict[str, object] | None", page_context["page_layout"])
         page_content = cast(str, page_context["page_content"])
+        raw_page_content = cast(str, page_context.get("raw_page_content") or page_content)
 
         page_entry = _page_entry_base(page_info, page_index)
         page_entry["content"] = page_content
@@ -1136,9 +1167,18 @@ def _build_document_projection(
                 )
             ]
             lines, words = _build_line_and_word_entries(
-                page_content=page_content,
+                page_content=raw_page_content,
                 page_offset=page_offset,
                 page_layout=page_layout,
+                string_index_type=string_index_type,
+            )
+            words = normalize_glued_counter_words(
+                [w for w in words if isinstance(w, dict)]
+            )
+            _relocate_word_spans(
+                words,
+                page_content=page_content,
+                page_offset=page_offset,
                 string_index_type=string_index_type,
             )
             page_entry["lines"] = lines
@@ -1324,11 +1364,21 @@ def _build_analyze_result(
         page_infos=page_infos,
         azure_pixel_coordinates=azure_pixel_coordinates,
     )
+    page_contents = [
+        str(page.get("content") or "").strip()
+        for page in pages
+        if isinstance(page, dict) and str(page.get("content") or "").strip()
+    ]
+    canonical_content = (
+        "\n\n".join(page_contents)
+        if page_contents
+        else canonicalize_page_counter_text(content)
+    )
     return {
         "apiVersion": api_version,
         "modelId": model_id,
         "stringIndexType": string_index_type,
-        "content": content,
+        "content": canonical_content,
         "pages": pages,
         "tables": tables,
         "paragraphs": paragraphs,
