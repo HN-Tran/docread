@@ -11,7 +11,11 @@ const advancedPanelEl = document.getElementById("advanced-panel");
 const advancedToggleEl = document.getElementById("advanced-toggle");
 const onboardingCardEl = document.getElementById("onboarding-card");
 const workbenchShellEl = document.getElementById("workbench-shell");
+const workbenchSidebarEl = document.getElementById("workbench-sidebar");
+const workbenchSettingsToggleEl = document.getElementById("workbench-settings-toggle");
 const workbenchStatusEl = document.getElementById("workbench-status");
+const workbenchToolbarStatusEl = document.getElementById("workbench-toolbar-status");
+const workbenchToolbarModelEl = document.getElementById("workbench-toolbar-model");
 const summaryBackendEl = document.getElementById("summary-backend");
 const summaryProviderEl = document.getElementById("summary-provider");
 const summaryModeEl = document.getElementById("summary-mode");
@@ -106,6 +110,11 @@ const metricsContentEl = document.getElementById("metrics-content");
 const metricsTabBtns = Array.from(document.querySelectorAll("[data-metrics-tab]"));
 const tr = (key, params) =>
   typeof window.docreadT === "function" ? window.docreadT(key, params) : key;
+const trFallback = (key, english, german = english) => {
+  const translated = tr(key);
+  if (translated !== key) return translated;
+  return document.documentElement.lang === "de" ? german : english;
+};
 
 function translateWarning(message) {
   if (!message || typeof message !== "string") return message;
@@ -289,9 +298,29 @@ function inputValueOrPlaceholder(el, fallback = "-") {
 
 function setWorkbenchStatus(key) {
   currentWorkbenchStatusKey = key;
-  if (!workbenchStatusEl) return;
-  workbenchStatusEl.textContent = tr(key);
-  workbenchStatusEl.dataset.status = key.replace("workbench_status_", "");
+  const statusText = tr(key);
+  const statusValue = key.replace("workbench_status_", "");
+  if (workbenchStatusEl) {
+    workbenchStatusEl.textContent = statusText;
+    workbenchStatusEl.dataset.status = statusValue;
+  }
+  if (workbenchToolbarStatusEl) {
+    workbenchToolbarStatusEl.textContent = statusText;
+    workbenchToolbarStatusEl.dataset.status = statusValue;
+  }
+}
+
+function setWorkbenchSettingsOpen(isOpen) {
+  workbenchShellEl?.classList.toggle("is-settings-collapsed", !isOpen);
+  workbenchSettingsToggleEl?.setAttribute("aria-expanded", String(isOpen));
+  workbenchSidebarEl?.toggleAttribute("inert", !isOpen);
+  if (workbenchSettingsToggleEl) {
+    workbenchSettingsToggleEl.textContent = trFallback(
+      isOpen ? "workbench_settings_hide" : "workbench_settings_show",
+      isOpen ? "Hide settings" : "OCR settings",
+      isOpen ? "Einstellungen ausblenden" : "OCR-Einstellungen",
+    );
+  }
 }
 
 function updateRunSummary() {
@@ -311,6 +340,12 @@ function updateRunSummary() {
   }
   if (summaryLayoutEl) summaryLayoutEl.textContent = selectedOptionText(layoutEl);
   if (summaryWordsEl) summaryWordsEl.textContent = selectedOptionText(wordDetectorEl);
+  if (workbenchToolbarModelEl) {
+    workbenchToolbarModelEl.textContent = [
+      selectedOptionText(backendEl),
+      inputValueOrPlaceholder(modelEl, document.body?.dataset.defaultModel || "-"),
+    ].filter(Boolean).join(" | ");
+  }
 }
 
 function setAdvancedOpen(isOpen) {
@@ -2831,7 +2866,18 @@ applyOptionsBtnEl.addEventListener("click", () => {
   }
   void runOCR();
 });
+workbenchSettingsToggleEl?.addEventListener("click", () => {
+  const isOpen = workbenchSettingsToggleEl.getAttribute("aria-expanded") === "true";
+  setWorkbenchSettingsOpen(!isOpen);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && workbenchSettingsToggleEl?.getAttribute("aria-expanded") === "true") {
+    setWorkbenchSettingsOpen(false);
+    workbenchSettingsToggleEl.focus();
+  }
+});
 initTheme();
+setWorkbenchSettingsOpen(false);
 setAdvancedOpen(false);
 toggleModeDependentFields();
 setWorkspaceVisible(false);
@@ -2843,6 +2889,7 @@ updateRunSummary();
 
 document.addEventListener("docread:locale-change", () => {
   setWorkbenchStatus(currentWorkbenchStatusKey);
+  setWorkbenchSettingsOpen(workbenchSettingsToggleEl?.getAttribute("aria-expanded") === "true");
   updateRunSummary();
 });
 

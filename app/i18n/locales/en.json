@@ -40,6 +40,8 @@
   "workbench_status_running": "Running",
   "workbench_status_ready": "Ready",
   "workbench_status_error": "Error",
+  "workbench_settings_show": "OCR settings",
+  "workbench_settings_hide": "Hide settings",
   "workbench_summary_backend": "Backend",
   "workbench_summary_provider": "Provider",
   "workbench_summary_mode": "Mode",

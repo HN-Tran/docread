@@ -156,8 +156,25 @@
             </div>
           </section>
 
-          <div id="workbench-shell" class="workbench-shell hidden">
-            <aside class="workbench-sidebar" aria-labelledby="run-settings-title">
+          <div id="workbench-shell" class="workbench-shell is-settings-collapsed hidden">
+            <div class="workbench-toolbar">
+              <button
+                id="workbench-settings-toggle"
+                class="workbench-settings-toggle"
+                type="button"
+                aria-expanded="false"
+                aria-controls="workbench-sidebar"
+                data-i18n="workbench_settings_show"
+              >
+                OCR settings
+              </button>
+              <div class="workbench-toolbar-status">
+                <span id="workbench-toolbar-status" data-i18n="workbench_status_idle">Idle</span>
+                <span id="workbench-toolbar-model">-</span>
+              </div>
+            </div>
+
+            <aside id="workbench-sidebar" class="workbench-sidebar" aria-labelledby="run-settings-title">
               <div class="workbench-sidebar-head">
                 <div>
                   <p class="workbench-kicker" data-i18n="workbench_run_kicker">Run settings</p>

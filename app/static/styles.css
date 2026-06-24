@@ -551,9 +551,91 @@ button:disabled {
 }
 
 .workbench-shell {
+  position: relative;
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 0.8rem;
   min-height: 0;
+}
+
+.workbench-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.workbench-settings-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.48rem;
+  min-height: 2.15rem;
+  border: 1px solid color-mix(in srgb, var(--line) 62%, var(--accent) 38%);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel) 75%, var(--accent) 25%);
+  color: var(--ink);
+  padding: 0.46rem 0.68rem;
+  font-size: 0.84rem;
+  font-weight: 740;
+}
+
+.workbench-settings-toggle::before {
+  content: "";
+  width: 0.94rem;
+  height: 0.68rem;
+  background:
+    linear-gradient(currentColor, currentColor) 0 0 / 100% 2px no-repeat,
+    linear-gradient(currentColor, currentColor) 0 50% / 100% 2px no-repeat,
+    linear-gradient(currentColor, currentColor) 0 100% / 100% 2px no-repeat;
+}
+
+.workbench-settings-toggle[aria-expanded="true"] {
+  background: var(--accent);
+  color: #fff;
+}
+
+.workbench-toolbar-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 680;
+}
+
+#workbench-toolbar-status {
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+  border-radius: 999px;
+  padding: 0.18rem 0.48rem;
+  background: color-mix(in srgb, var(--pre-bg) 84%, var(--panel) 16%);
+}
+
+#workbench-toolbar-status[data-status="running"] {
+  border-color: color-mix(in srgb, var(--accent-2) 55%, var(--line));
+  color: var(--accent-2);
+}
+
+#workbench-toolbar-status[data-status="ready"] {
+  border-color: color-mix(in srgb, var(--success) 58%, var(--line));
+  color: var(--success);
+}
+
+#workbench-toolbar-status[data-status="error"] {
+  border-color: color-mix(in srgb, var(--danger) 58%, var(--line));
+  color: var(--danger);
+}
+
+#workbench-toolbar-model {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .workbench-sidebar,
@@ -566,12 +648,29 @@ button:disabled {
 }
 
 .workbench-sidebar {
+  position: absolute;
+  z-index: 30;
+  top: calc(2.15rem + 0.8rem);
+  bottom: 0;
+  left: 0;
+  width: min(350px, 100%);
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
   min-height: 0;
   padding: 0.85rem;
   overflow: hidden;
+  transition:
+    opacity 0.18s ease,
+    transform 0.22s ease,
+    visibility 0.18s ease;
+}
+
+.workbench-shell.is-settings-collapsed .workbench-sidebar {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(calc(-100% - 1rem));
+  visibility: hidden;
 }
 
 .workbench-sidebar-head {
@@ -659,6 +758,7 @@ button:disabled {
 }
 
 .workbench-viewer {
+  grid-row: 2;
   display: flex;
   min-height: 360px;
   overflow: hidden;
@@ -2470,12 +2570,6 @@ body.is-loading {
   text-align: center;
 }
 
-@media (min-width: 860px) {
-  .workbench-shell {
-    grid-template-columns: minmax(280px, 330px) minmax(0, 1fr);
-  }
-}
-
 @media (min-width: 1060px) {
   .page {
     padding: 1.25rem;
@@ -2489,7 +2583,7 @@ body.is-loading {
   }
 
   .page.has-workspace {
-    grid-template-columns: minmax(700px, 1.55fr) minmax(360px, 0.85fr);
+    grid-template-columns: minmax(760px, 1.68fr) minmax(360px, 0.82fr);
     align-items: stretch;
     gap: 0.85rem;
   }
@@ -2517,11 +2611,7 @@ body.is-loading {
 
 @media (min-width: 1320px) {
   .page.has-workspace {
-    grid-template-columns: minmax(820px, 1.6fr) minmax(400px, 0.8fr);
-  }
-
-  .workbench-shell {
-    grid-template-columns: minmax(300px, 350px) minmax(0, 1fr);
+    grid-template-columns: minmax(900px, 1.7fr) minmax(400px, 0.78fr);
   }
 }
 
@@ -2551,6 +2641,7 @@ body.is-loading {
 
   .workbench-sidebar {
     padding: 0.72rem;
+    width: 100%;
   }
 
   .workbench-sidebar-head {
@@ -2559,6 +2650,20 @@ body.is-loading {
 
   .workbench-viewer {
     min-height: 340px;
+  }
+
+  .workbench-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .workbench-settings-toggle {
+    justify-content: center;
+  }
+
+  .workbench-toolbar-status {
+    justify-content: space-between;
+    width: 100%;
   }
 
   .run-summary-item {
