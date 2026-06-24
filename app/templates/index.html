@@ -108,28 +108,51 @@
           />
 
           <section id="onboarding-card" class="onboarding-card">
-            <div class="onboarding-hero">
-              <button id="dropzone" class="dropzone" type="button" data-i18n="onboarding_dropzone">
-                Drop images, PDFs, or Word documents here
-              </button>
-            </div>
-            <div class="onboarding-actions">
-              <button id="pick-file-btn" class="pick-file-btn" type="button" data-i18n="onboarding_pick_file">Choose file</button>
-              {% if examples %}
-              <div class="example-actions" id="example-actions">
-                <span class="example-actions-label" data-i18n="onboarding_examples_label">Examples:</span>
-                {% for ex in examples %}
-                <button
-                  type="button"
-                  class="action-btn secondary-action example-btn"
-                  data-example-slot="{{ ex.slot }}"
-                >{{ ex.label }}</button>
-                {% endfor %}
+            <div class="onboarding-stage">
+              <div class="onboarding-primary">
+                <button id="dropzone" class="dropzone" type="button" data-i18n="onboarding_dropzone">
+                  Drop images, PDFs, or Word documents here
+                </button>
+                <div class="onboarding-actions">
+                  <button id="pick-file-btn" class="pick-file-btn" type="button" data-i18n="onboarding_pick_file">Choose file</button>
+                  {% if examples %}
+                  <div class="example-actions" id="example-actions">
+                    <span class="example-actions-label" data-i18n="onboarding_examples_label">Examples:</span>
+                    {% for ex in examples %}
+                    <button
+                      type="button"
+                      class="action-btn secondary-action example-btn"
+                      data-example-slot="{{ ex.slot }}"
+                    >{{ ex.label }}</button>
+                    {% endfor %}
+                  </div>
+                  {% endif %}
+                </div>
+                <p class="onboarding-hint" data-i18n="onboarding_hint">
+                  Supports PNG, JPEG, WEBP, GIF, TIFF, multi-page PDFs, Word (DOC/DOCX/DOT/DOTX), and PowerPoint (PPT/PPTX).
+                </p>
               </div>
-              {% endif %}
-              <p class="onboarding-hint" data-i18n="onboarding_hint">
-                Supports PNG, JPEG, WEBP, GIF, TIFF, multi-page PDFs, Word (DOC/DOCX/DOT/DOTX), and PowerPoint (PPT/PPTX).
-              </p>
+              <div class="onboarding-preview" aria-hidden="true">
+                <div class="onboarding-preview-head">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
+                <div class="onboarding-document">
+                  <div class="document-title-line"></div>
+                  <div class="document-line document-line-wide"></div>
+                  <div class="document-line"></div>
+                  <div class="document-line document-line-short"></div>
+                  <div class="document-table">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </div>
+                </div>
+              </div>
             </div>
           </section>
 

@@ -116,6 +116,8 @@
   "meta_error": "Error: {message}",
   "meta_backend": "Backend: {backend} | Model: {model} | Latency: {latency} ms",
   "meta_warnings": " | Notes: {warnings}",
+  "meta_latency_label": "Latency",
+  "meta_diagnostics_summary": "Run diagnostics ({count})",
   "aria_result_view": "Output view",
   "result_view_layout": "Layout",
   "result_view_words": "Words",

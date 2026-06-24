@@ -359,6 +359,61 @@ function clearOutput() {
   clearLayoutDisplay();
 }
 
+function setRunMetaMessage(message) {
+  metaEl.innerHTML = "";
+  const messageEl = document.createElement("span");
+  messageEl.className = "run-meta-message";
+  messageEl.textContent = message;
+  metaEl.appendChild(messageEl);
+}
+
+function appendRunMetaChip(container, label, value) {
+  const chipEl = document.createElement("span");
+  chipEl.className = "run-meta-chip";
+  const labelEl = document.createElement("span");
+  labelEl.className = "run-meta-chip-label";
+  labelEl.textContent = label;
+  const valueEl = document.createElement("strong");
+  valueEl.textContent = value || "-";
+  chipEl.append(labelEl, valueEl);
+  container.appendChild(chipEl);
+}
+
+function renderRunMeta(data, { backendFallback }) {
+  metaEl.innerHTML = "";
+  const backend = data.backend || backendFallback || "direct";
+  const latency = Number.isFinite(Number(data.latency_ms)) ? `${data.latency_ms} ms` : "-";
+  const summaryEl = document.createElement("div");
+  summaryEl.className = "run-meta-summary";
+  appendRunMetaChip(summaryEl, tr("workbench_summary_backend"), backend);
+  appendRunMetaChip(summaryEl, tr("workbench_summary_model"), data.model || "-");
+  appendRunMetaChip(summaryEl, tr("meta_latency_label"), latency);
+  metaEl.appendChild(summaryEl);
+
+  const warnings = (data.warnings || [])
+    .map((w) => translateWarning(String(w)))
+    .filter(Boolean);
+  if (warnings.length === 0) {
+    return;
+  }
+
+  const diagnosticsEl = document.createElement("details");
+  diagnosticsEl.className = "run-diagnostics";
+  const summary = document.createElement("summary");
+  summary.textContent = tr("meta_diagnostics_summary", { count: warnings.length });
+  diagnosticsEl.appendChild(summary);
+
+  const listEl = document.createElement("ul");
+  listEl.className = "run-diagnostics-list";
+  warnings.forEach((warning) => {
+    const itemEl = document.createElement("li");
+    itemEl.textContent = warning;
+    listEl.appendChild(itemEl);
+  });
+  diagnosticsEl.appendChild(listEl);
+  metaEl.appendChild(diagnosticsEl);
+}
+
 function setWorkspaceVisible(isVisible) {
   if (pageEl) {
     pageEl.classList.toggle("is-start", !isVisible);
@@ -2113,13 +2168,7 @@ function applyOcrResponse(data, { requestMode, requestTask, backendFallback }) {
     jsonOutputEl.innerHTML = "";
   }
 
-  const warnings = (data.warnings || [])
-    .map((w) => translateWarning(String(w)))
-    .join(" | ");
-  const backend = data.backend || backendFallback || "direct";
-  metaEl.textContent =
-    tr("meta_backend", { backend, model: data.model, latency: data.latency_ms }) +
-    (warnings ? tr("meta_warnings", { warnings }) : "");
+  renderRunMeta(data, { backendFallback });
 
   void maybeFetchReferenceMetrics(data?.text || "");
 }
@@ -2527,7 +2576,7 @@ async function runOCR() {
     }
     setLoading(false);
     setWorkbenchStatus("workbench_status_idle");
-    metaEl.textContent = tr("meta_pick_file");
+    setRunMetaMessage(tr("meta_pick_file"));
     clearOutput();
     setWorkspaceVisible(false);
     return;
@@ -2544,7 +2593,7 @@ async function runOCR() {
   setWorkspaceVisible(true);
   updateRunSummary();
   setWorkbenchStatus("workbench_status_running");
-  metaEl.textContent = tr("meta_running");
+  setRunMetaMessage(tr("meta_running"));
 
   try {
     const requestMode = String(payload.get("mode") || "plain");
@@ -2571,7 +2620,7 @@ async function runOCR() {
       return;
     }
     setWorkbenchStatus("workbench_status_error");
-    metaEl.textContent = tr("meta_error", { message: error.message });
+    setRunMetaMessage(tr("meta_error", { message: error.message }));
   } finally {
     if (activeRequestController === controller) {
       activeRequestController = null;
@@ -3240,7 +3289,7 @@ async function runExample(slot) {
       try {
         await _loadExampleFile(slot);
       } catch (err) {
-        metaEl.textContent = tr("example_load_failed", { message: err.message });
+        setRunMetaMessage(tr("example_load_failed", { message: err.message }));
         return;
       }
       applyOcrResponse(cached.ocr_response, {
@@ -3261,7 +3310,7 @@ async function runExample(slot) {
   try {
     await _loadExampleFile(slot);
   } catch (err) {
-    metaEl.textContent = tr("example_load_failed", { message: err.message });
+    setRunMetaMessage(tr("example_load_failed", { message: err.message }));
     return;
   }
   await runOCR();
