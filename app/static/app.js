@@ -3378,6 +3378,9 @@ document.querySelectorAll("button[data-example-slot]").forEach((btn) => {
 
 function refreshUiOnLocaleChange() {
   window.docreadApplyI18n?.();
+  setWorkbenchStatus(currentWorkbenchStatusKey);
+  setWorkbenchSettingsOpen(workbenchSettingsToggleEl?.getAttribute("aria-expanded") === "true");
+  updateRunSummary();
   if (advancedToggleEl) {
     setAdvancedOpen(advancedToggleEl.getAttribute("aria-expanded") === "true");
   }
