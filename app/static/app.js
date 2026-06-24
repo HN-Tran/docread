@@ -10,6 +10,18 @@ const schemaWrap = document.getElementById("schema-wrap");
 const advancedPanelEl = document.getElementById("advanced-panel");
 const advancedToggleEl = document.getElementById("advanced-toggle");
 const onboardingCardEl = document.getElementById("onboarding-card");
+const workbenchShellEl = document.getElementById("workbench-shell");
+const workbenchSidebarEl = document.getElementById("workbench-sidebar");
+const workbenchSettingsToggleEl = document.getElementById("workbench-settings-toggle");
+const workbenchStatusEl = document.getElementById("workbench-status");
+const workbenchToolbarStatusEl = document.getElementById("workbench-toolbar-status");
+const workbenchToolbarModelEl = document.getElementById("workbench-toolbar-model");
+const summaryBackendEl = document.getElementById("summary-backend");
+const summaryProviderEl = document.getElementById("summary-provider");
+const summaryModeEl = document.getElementById("summary-mode");
+const summaryModelEl = document.getElementById("summary-model");
+const summaryLayoutEl = document.getElementById("summary-layout");
+const summaryWordsEl = document.getElementById("summary-words");
 const dropzoneEl = document.getElementById("dropzone");
 const pickFileBtnEl = document.getElementById("pick-file-btn");
 const changeFileBtnEl = document.getElementById("change-file-btn");
@@ -98,6 +110,11 @@ const metricsContentEl = document.getElementById("metrics-content");
 const metricsTabBtns = Array.from(document.querySelectorAll("[data-metrics-tab]"));
 const tr = (key, params) =>
   typeof window.docreadT === "function" ? window.docreadT(key, params) : key;
+const trFallback = (key, english, german = english) => {
+  const translated = tr(key);
+  if (translated !== key) return translated;
+  return document.documentElement.lang === "de" ? german : english;
+};
 
 function translateWarning(message) {
   if (!message || typeof message !== "string") return message;
@@ -134,6 +151,7 @@ let previewUrl = null;
 let activeRequestController = null;
 let globalDragDepth = 0;
 let hasPendingAdvancedChanges = false;
+let currentWorkbenchStatusKey = "workbench_status_idle";
 let activeResultView = "layout";
 let pageImageDataUrls = [];
 let currentPageIndex = 0;
@@ -263,6 +281,73 @@ function toggleModeDependentFields() {
   customPromptWrap.classList.toggle("hidden", isStructuredMode(modeEl.value));
 }
 
+function selectedOptionText(el) {
+  if (!el) return "-";
+  const selected = el.selectedOptions?.[0];
+  const label = selected?.textContent?.trim() || el.value || "-";
+  return label.replace(/\s+/g, " ");
+}
+
+function inputValueOrPlaceholder(el, fallback = "-") {
+  if (!el) return fallback;
+  const value = String(el.value || "").trim();
+  if (value) return value;
+  const placeholder = String(el.getAttribute("placeholder") || "").trim();
+  return placeholder || fallback;
+}
+
+function setWorkbenchStatus(key) {
+  currentWorkbenchStatusKey = key;
+  const statusText = tr(key);
+  const statusValue = key.replace("workbench_status_", "");
+  if (workbenchStatusEl) {
+    workbenchStatusEl.textContent = statusText;
+    workbenchStatusEl.dataset.status = statusValue;
+  }
+  if (workbenchToolbarStatusEl) {
+    workbenchToolbarStatusEl.textContent = statusText;
+    workbenchToolbarStatusEl.dataset.status = statusValue;
+  }
+}
+
+function setWorkbenchSettingsOpen(isOpen) {
+  workbenchShellEl?.classList.toggle("is-settings-collapsed", !isOpen);
+  workbenchSettingsToggleEl?.setAttribute("aria-expanded", String(isOpen));
+  workbenchSidebarEl?.toggleAttribute("inert", !isOpen);
+  if (workbenchSettingsToggleEl) {
+    workbenchSettingsToggleEl.textContent = trFallback(
+      isOpen ? "workbench_settings_hide" : "workbench_settings_show",
+      isOpen ? "Hide settings" : "OCR settings",
+      isOpen ? "Einstellungen ausblenden" : "OCR-Einstellungen",
+    );
+  }
+}
+
+function updateRunSummary() {
+  const backendEl = document.getElementById("backend");
+  const providerEl = document.getElementById("inference_provider");
+  const layoutEl = document.getElementById("expert_enable_layout");
+  const wordDetectorEl = document.getElementById("expert_word_detector");
+  const modelEl = document.getElementById("model");
+  if (summaryBackendEl) summaryBackendEl.textContent = selectedOptionText(backendEl);
+  if (summaryProviderEl) summaryProviderEl.textContent = selectedOptionText(providerEl);
+  if (summaryModeEl) summaryModeEl.textContent = selectedOptionText(modeEl);
+  if (summaryModelEl) {
+    summaryModelEl.textContent = inputValueOrPlaceholder(
+      modelEl,
+      document.body?.dataset.defaultModel || "-",
+    );
+  }
+  if (summaryLayoutEl) summaryLayoutEl.textContent = selectedOptionText(layoutEl);
+  if (summaryWordsEl) summaryWordsEl.textContent = selectedOptionText(wordDetectorEl);
+  if (workbenchToolbarModelEl) {
+    workbenchToolbarModelEl.textContent = [
+      selectedOptionText(backendEl),
+      inputValueOrPlaceholder(modelEl, document.body?.dataset.defaultModel || "-"),
+    ].filter(Boolean).join(" | ");
+  }
+}
+
 function setAdvancedOpen(isOpen) {
   advancedPanelEl.classList.toggle("is-collapsed", !isOpen);
   advancedPanelEl.toggleAttribute("inert", !isOpen);
@@ -287,6 +372,7 @@ function setAdvancedDirty(isDirty) {
   hasPendingAdvancedChanges = isDirty;
   applyOptionsBtnEl.disabled = !isDirty;
   advancedDirtyHintEl.classList.toggle("hidden", !isDirty);
+  updateRunSummary();
 }
 
 function clearOutput() {
@@ -308,12 +394,68 @@ function clearOutput() {
   clearLayoutDisplay();
 }
 
+function setRunMetaMessage(message) {
+  metaEl.innerHTML = "";
+  const messageEl = document.createElement("span");
+  messageEl.className = "run-meta-message";
+  messageEl.textContent = message;
+  metaEl.appendChild(messageEl);
+}
+
+function appendRunMetaChip(container, label, value) {
+  const chipEl = document.createElement("span");
+  chipEl.className = "run-meta-chip";
+  const labelEl = document.createElement("span");
+  labelEl.className = "run-meta-chip-label";
+  labelEl.textContent = label;
+  const valueEl = document.createElement("strong");
+  valueEl.textContent = value || "-";
+  chipEl.append(labelEl, valueEl);
+  container.appendChild(chipEl);
+}
+
+function renderRunMeta(data, { backendFallback }) {
+  metaEl.innerHTML = "";
+  const backend = data.backend || backendFallback || "direct";
+  const latency = Number.isFinite(Number(data.latency_ms)) ? `${data.latency_ms} ms` : "-";
+  const summaryEl = document.createElement("div");
+  summaryEl.className = "run-meta-summary";
+  appendRunMetaChip(summaryEl, tr("workbench_summary_backend"), backend);
+  appendRunMetaChip(summaryEl, tr("workbench_summary_model"), data.model || "-");
+  appendRunMetaChip(summaryEl, tr("meta_latency_label"), latency);
+  metaEl.appendChild(summaryEl);
+
+  const warnings = (data.warnings || [])
+    .map((w) => translateWarning(String(w)))
+    .filter(Boolean);
+  if (warnings.length === 0) {
+    return;
+  }
+
+  const diagnosticsEl = document.createElement("details");
+  diagnosticsEl.className = "run-diagnostics";
+  const summary = document.createElement("summary");
+  summary.textContent = tr("meta_diagnostics_summary", { count: warnings.length });
+  diagnosticsEl.appendChild(summary);
+
+  const listEl = document.createElement("ul");
+  listEl.className = "run-diagnostics-list";
+  warnings.forEach((warning) => {
+    const itemEl = document.createElement("li");
+    itemEl.textContent = warning;
+    listEl.appendChild(itemEl);
+  });
+  diagnosticsEl.appendChild(listEl);
+  metaEl.appendChild(diagnosticsEl);
+}
+
 function setWorkspaceVisible(isVisible) {
   if (pageEl) {
     pageEl.classList.toggle("is-start", !isVisible);
     pageEl.classList.toggle("has-workspace", isVisible);
   }
   onboardingCardEl.classList.toggle("hidden", isVisible);
+  workbenchShellEl?.classList.toggle("hidden", !isVisible);
   previewWrapEl.classList.toggle("hidden", !isVisible);
   resultPanelEl.classList.toggle("hidden", !isVisible);
 }
@@ -2061,13 +2203,7 @@ function applyOcrResponse(data, { requestMode, requestTask, backendFallback }) {
     jsonOutputEl.innerHTML = "";
   }
 
-  const warnings = (data.warnings || [])
-    .map((w) => translateWarning(String(w)))
-    .join(" | ");
-  const backend = data.backend || backendFallback || "direct";
-  metaEl.textContent =
-    tr("meta_backend", { backend, model: data.model, latency: data.latency_ms }) +
-    (warnings ? tr("meta_warnings", { warnings }) : "");
+  renderRunMeta(data, { backendFallback });
 
   void maybeFetchReferenceMetrics(data?.text || "");
 }
@@ -2474,7 +2610,8 @@ async function runOCR() {
       activeRequestController = null;
     }
     setLoading(false);
-    metaEl.textContent = tr("meta_pick_file");
+    setWorkbenchStatus("workbench_status_idle");
+    setRunMetaMessage(tr("meta_pick_file"));
     clearOutput();
     setWorkspaceVisible(false);
     return;
@@ -2489,7 +2626,9 @@ async function runOCR() {
   setLoading(true);
   clearOutput();
   setWorkspaceVisible(true);
-  metaEl.textContent = tr("meta_running");
+  updateRunSummary();
+  setWorkbenchStatus("workbench_status_running");
+  setRunMetaMessage(tr("meta_running"));
 
   try {
     const requestMode = String(payload.get("mode") || "plain");
@@ -2510,11 +2649,13 @@ async function runOCR() {
       requestTask,
       backendFallback: String(payload.get("backend") || "direct"),
     });
+    setWorkbenchStatus("workbench_status_ready");
   } catch (error) {
     if (error.name === "AbortError") {
       return;
     }
-    metaEl.textContent = tr("meta_error", { message: error.message });
+    setWorkbenchStatus("workbench_status_error");
+    setRunMetaMessage(tr("meta_error", { message: error.message }));
   } finally {
     if (activeRequestController === controller) {
       activeRequestController = null;
@@ -2689,18 +2830,27 @@ previewImageEl.addEventListener("error", () => {
 });
 modeEl.addEventListener("change", () => {
   toggleModeDependentFields();
+  updateRunSummary();
 });
 advancedPanelEl.addEventListener("change", () => {
   setAdvancedDirty(true);
+  updateRunSummary();
 });
 advancedPanelEl.addEventListener("input", () => {
   setAdvancedDirty(true);
+  updateRunSummary();
 });
 advancedPanelEl
   .querySelectorAll("input, select, textarea")
   .forEach((el) => {
-    el.addEventListener("change", () => setAdvancedDirty(true));
-    el.addEventListener("input", () => setAdvancedDirty(true));
+    el.addEventListener("change", () => {
+      setAdvancedDirty(true);
+      updateRunSummary();
+    });
+    el.addEventListener("input", () => {
+      setAdvancedDirty(true);
+      updateRunSummary();
+    });
   });
 form.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -2716,13 +2866,32 @@ applyOptionsBtnEl.addEventListener("click", () => {
   }
   void runOCR();
 });
+workbenchSettingsToggleEl?.addEventListener("click", () => {
+  const isOpen = workbenchSettingsToggleEl.getAttribute("aria-expanded") === "true";
+  setWorkbenchSettingsOpen(!isOpen);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && workbenchSettingsToggleEl?.getAttribute("aria-expanded") === "true") {
+    setWorkbenchSettingsOpen(false);
+    workbenchSettingsToggleEl.focus();
+  }
+});
 initTheme();
+setWorkbenchSettingsOpen(false);
 setAdvancedOpen(false);
 toggleModeDependentFields();
 setWorkspaceVisible(false);
 clearPreview();
 setLoading(false);
 setAdvancedDirty(false);
+setWorkbenchStatus("workbench_status_idle");
+updateRunSummary();
+
+document.addEventListener("docread:locale-change", () => {
+  setWorkbenchStatus(currentWorkbenchStatusKey);
+  setWorkbenchSettingsOpen(workbenchSettingsToggleEl?.getAttribute("aria-expanded") === "true");
+  updateRunSummary();
+});
 
 copyBtn.addEventListener("click", async () => {
   const text = lastResponse && lastResponse.mode === "structured" && lastResponse.structured
@@ -2852,6 +3021,7 @@ async function _refreshModelSuggestions() {
   if (modelEl && !modelEl.value.trim() && _defaultModelName) {
     modelEl.placeholder = _defaultModelName;
   }
+  updateRunSummary();
 }
 
 async function _initInferenceControls() {
@@ -2875,6 +3045,7 @@ async function _initInferenceControls() {
 
 inferenceProviderEl?.addEventListener("change", () => {
   localStorage.setItem(INFERENCE_PROVIDER_KEY, inferenceProviderEl.value);
+  updateRunSummary();
   void _refreshModelSuggestions();
   if (ourModelSelectEl || theirModelSelectEl) {
     _localModelsCacheByProvider = {};
@@ -3165,7 +3336,7 @@ async function runExample(slot) {
       try {
         await _loadExampleFile(slot);
       } catch (err) {
-        metaEl.textContent = tr("example_load_failed", { message: err.message });
+        setRunMetaMessage(tr("example_load_failed", { message: err.message }));
         return;
       }
       applyOcrResponse(cached.ocr_response, {
@@ -3186,7 +3357,7 @@ async function runExample(slot) {
   try {
     await _loadExampleFile(slot);
   } catch (err) {
-    metaEl.textContent = tr("example_load_failed", { message: err.message });
+    setRunMetaMessage(tr("example_load_failed", { message: err.message }));
     return;
   }
   await runOCR();
@@ -3207,6 +3378,9 @@ document.querySelectorAll("button[data-example-slot]").forEach((btn) => {
 
 function refreshUiOnLocaleChange() {
   window.docreadApplyI18n?.();
+  setWorkbenchStatus(currentWorkbenchStatusKey);
+  setWorkbenchSettingsOpen(workbenchSettingsToggleEl?.getAttribute("aria-expanded") === "true");
+  updateRunSummary();
   if (advancedToggleEl) {
     setAdvancedOpen(advancedToggleEl.getAttribute("aria-expanded") === "true");
   }

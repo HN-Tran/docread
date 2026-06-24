@@ -19,82 +19,82 @@
             <p class="sub" data-i18n="page_subtitle">Drop a file and extract text in seconds.</p>
           </div>
           <div class="heading-end">
-          <div class="header-actions">
-            <a
-              class="api-docs-link"
-              href="{{ app_base_path }}/benchmark"
-              data-i18n-title="nav_benchmark_title"
-              title="Batch benchmark"
-            ><span data-i18n="nav_benchmark">Benchmark</span></a>
-            <a
-              class="api-docs-link"
-              href="{{ app_base_path }}/docs"
-              target="_blank"
-              rel="noopener"
-              data-i18n-title="nav_swagger_title"
-              title="API documentation (Swagger UI)"
-            ><span data-i18n="nav_swagger">Swagger</span></a>
-            <a
-              class="api-docs-link"
-              href="{{ app_base_path }}/redoc"
-              target="_blank"
-              rel="noopener"
-              data-i18n-title="nav_redoc_title"
-              title="API documentation (ReDoc)"
-            ><span data-i18n="nav_redoc">ReDoc</span></a>
-            <a
-              class="api-docs-link"
-              href="{{ app_base_path }}/openapi.json"
-              target="_blank"
-              rel="noopener"
-              data-i18n-title="nav_openapi_title"
-              title="OpenAPI schema (JSON)"
-            ><span data-i18n="nav_openapi">OpenAPI</span></a>
-          </div>
-          <div class="header-toggles">
-            <div class="locale-toggle" role="group" data-i18n-aria-label="aria_language" aria-label="Language">
-              <button
-                id="locale-en-btn"
-                class="locale-option"
-                type="button"
-                aria-pressed="{{ 'true' if app_locale == 'en' else 'false' }}"
-                title="English"
-              >EN</button>
-              <button
-                id="locale-de-btn"
-                class="locale-option"
-                type="button"
-                aria-pressed="{{ 'true' if app_locale == 'de' else 'false' }}"
-                title="Deutsch"
-              >DE</button>
+            <div class="header-actions">
+              <a
+                class="api-docs-link"
+                href="{{ app_base_path }}/benchmark"
+                data-i18n-title="nav_benchmark_title"
+                title="Batch benchmark"
+              ><span data-i18n="nav_benchmark">Benchmark</span></a>
+              <a
+                class="api-docs-link"
+                href="{{ app_base_path }}/docs"
+                target="_blank"
+                rel="noopener"
+                data-i18n-title="nav_swagger_title"
+                title="API documentation (Swagger UI)"
+              ><span data-i18n="nav_swagger">Swagger</span></a>
+              <a
+                class="api-docs-link"
+                href="{{ app_base_path }}/redoc"
+                target="_blank"
+                rel="noopener"
+                data-i18n-title="nav_redoc_title"
+                title="API documentation (ReDoc)"
+              ><span data-i18n="nav_redoc">ReDoc</span></a>
+              <a
+                class="api-docs-link"
+                href="{{ app_base_path }}/openapi.json"
+                target="_blank"
+                rel="noopener"
+                data-i18n-title="nav_openapi_title"
+                title="OpenAPI schema (JSON)"
+              ><span data-i18n="nav_openapi">OpenAPI</span></a>
             </div>
-            <div class="theme-toggle" role="group" data-i18n-aria-label="aria_color_mode" aria-label="Color mode">
-            <button
-              id="theme-light-btn"
-              class="theme-option"
-              type="button"
-              data-i18n-aria-label="aria_light_mode"
-              data-i18n-title="aria_light_mode"
-              aria-label="Light mode"
-              title="Light mode"
-              aria-pressed="true"
-            >
-              <span class="theme-icon" aria-hidden="true">☀</span>
-            </button>
-            <button
-              id="theme-dark-btn"
-              class="theme-option"
-              type="button"
-              data-i18n-aria-label="aria_dark_mode"
-              data-i18n-title="aria_dark_mode"
-              aria-label="Dark mode"
-              title="Dark mode"
-              aria-pressed="false"
-            >
-              <span class="theme-icon" aria-hidden="true">☾</span>
-            </button>
+            <div class="header-toggles">
+              <div class="locale-toggle" role="group" data-i18n-aria-label="aria_language" aria-label="Language">
+                <button
+                  id="locale-en-btn"
+                  class="locale-option"
+                  type="button"
+                  aria-pressed="{{ 'true' if app_locale == 'en' else 'false' }}"
+                  title="English"
+                >EN</button>
+                <button
+                  id="locale-de-btn"
+                  class="locale-option"
+                  type="button"
+                  aria-pressed="{{ 'true' if app_locale == 'de' else 'false' }}"
+                  title="Deutsch"
+                >DE</button>
+              </div>
+              <div class="theme-toggle" role="group" data-i18n-aria-label="aria_color_mode" aria-label="Color mode">
+                <button
+                  id="theme-light-btn"
+                  class="theme-option"
+                  type="button"
+                  data-i18n-aria-label="aria_light_mode"
+                  data-i18n-title="aria_light_mode"
+                  aria-label="Light mode"
+                  title="Light mode"
+                  aria-pressed="true"
+                >
+                  <span class="theme-icon" aria-hidden="true">☀</span>
+                </button>
+                <button
+                  id="theme-dark-btn"
+                  class="theme-option"
+                  type="button"
+                  data-i18n-aria-label="aria_dark_mode"
+                  data-i18n-title="aria_dark_mode"
+                  aria-label="Dark mode"
+                  title="Dark mode"
+                  aria-pressed="false"
+                >
+                  <span class="theme-icon" aria-hidden="true">☾</span>
+                </button>
+              </div>
             </div>
-          </div>
           </div>
         </div>
         <form id="ocr-form">
@@ -108,364 +108,462 @@
           />
 
           <section id="onboarding-card" class="onboarding-card">
-            <div class="onboarding-hero">
-              <button id="dropzone" class="dropzone" type="button" data-i18n="onboarding_dropzone">
-                Drop images, PDFs, or Word documents here
-              </button>
-            </div>
-            <div class="onboarding-actions">
-              <button id="pick-file-btn" class="pick-file-btn" type="button" data-i18n="onboarding_pick_file">Choose file</button>
-              {% if examples %}
-              <div class="example-actions" id="example-actions">
-                <span class="example-actions-label" data-i18n="onboarding_examples_label">Examples:</span>
-                {% for ex in examples %}
-                <button
-                  type="button"
-                  class="action-btn secondary-action example-btn"
-                  data-example-slot="{{ ex.slot }}"
-                >{{ ex.label }}</button>
-                {% endfor %}
+            <div class="onboarding-stage">
+              <div class="onboarding-primary">
+                <p class="onboarding-kicker" data-i18n="onboarding_kicker">Document text extraction</p>
+                <h2 class="onboarding-headline" data-i18n="onboarding_headline">
+                  From scanned page to clean, structured text.
+                </h2>
+                <button id="dropzone" class="dropzone" type="button" data-i18n="onboarding_dropzone">
+                  Drop images, PDFs, or Word documents here
+                </button>
+                <div class="onboarding-actions">
+                  <button id="pick-file-btn" class="pick-file-btn" type="button" data-i18n="onboarding_pick_file">Choose file</button>
+                  {% if examples %}
+                  <div class="example-actions" id="example-actions">
+                    <span class="example-actions-label" data-i18n="onboarding_examples_label">Examples:</span>
+                    {% for ex in examples %}
+                    <button
+                      type="button"
+                      class="action-btn secondary-action example-btn"
+                      data-example-slot="{{ ex.slot }}"
+                    >{{ ex.label }}</button>
+                    {% endfor %}
+                  </div>
+                  {% endif %}
+                </div>
+                <p class="onboarding-hint" data-i18n="onboarding_hint">
+                  Supports PNG, JPEG, WEBP, GIF, TIFF, multi-page PDFs, Word (DOC/DOCX/DOT/DOTX), and PowerPoint (PPT/PPTX).
+                </p>
               </div>
-              {% endif %}
-              <p class="onboarding-hint" data-i18n="onboarding_hint">
-                Supports PNG, JPEG, WEBP, GIF, TIFF, multi-page PDFs, Word (DOC/DOCX/DOT/DOTX), and PowerPoint (PPT/PPTX).
-              </p>
+
+              <figure class="onboarding-demo" aria-hidden="true">
+                <div class="demo-panel demo-panel-scan">
+                  <span class="demo-label" data-i18n="onboarding_demo_input">Scanned input</span>
+                  <div class="demo-scan">
+                    <div class="demo-scanline"></div>
+                    <span class="demo-ink demo-ink-title"></span>
+                    <span class="demo-ink demo-ink-wide"></span>
+                    <span class="demo-ink"></span>
+                    <span class="demo-ink demo-ink-short"></span>
+                    <span class="demo-ink demo-ink-wide"></span>
+                    <span class="demo-ink"></span>
+                  </div>
+                </div>
+
+                <div class="demo-flow" aria-hidden="true">
+                  <span class="demo-flow-dot"></span>
+                  <span class="demo-flow-chevron">›</span>
+                </div>
+
+                <div class="demo-panel demo-panel-out">
+                  <span class="demo-label" data-i18n="onboarding_demo_output">Extracted text</span>
+                  <div class="demo-out">
+                    <p class="demo-out-line"><b>INVOICE</b> <i>2024-0481</i></p>
+                    <p class="demo-out-line">Issued&nbsp;&nbsp;2024-03-12</p>
+                    <p class="demo-out-line demo-out-muted">Acme Civic Supplies GmbH</p>
+                    <div class="demo-out-table">
+                      <span>Item</span><span>Qty</span><span>Amount</span>
+                      <span>Folders</span><span>40</span><span>312.00</span>
+                      <span>Toner</span><span>12</span><span>198.40</span>
+                    </div>
+                    <p class="demo-out-line demo-out-total">Total&nbsp;&nbsp;<b>1,240.00</b></p>
+                  </div>
+                </div>
+              </figure>
             </div>
           </section>
 
-          <div id="preview-wrap" class="preview-wrap hidden">
-            <div class="preview-head">
-              <div>
-                <p class="preview-title" data-i18n="preview_title">Preview</p>
-                <p class="preview-drop-hint" data-i18n="preview_drop_hint">
-                  Drag a file into the browser window and release to replace.
-                </p>
-              </div>
-              <button id="change-file-btn" class="change-file-btn" type="button" data-i18n="preview_change_file">Change file</button>
-            </div>
-            <div id="page-selector-wrap" class="page-selector-wrap hidden">
-              <label for="page-selector"><span data-i18n="preview_page_label">Page:</span></label>
-              <select id="page-selector"></select>
-            </div>
-            <div id="preview-zoom" class="preview-zoom hidden">
-              <button type="button" class="preview-zoom-step" id="preview-zoom-out" data-i18n-aria-label="preview_zoom_out" aria-label="Zoom out">−</button>
-              <input type="range" id="preview-zoom-slider" min="0.5" max="3" step="0.05" value="1" />
-              <span id="preview-zoom-value" class="preview-zoom-value">100 %</span>
-              <button type="button" class="preview-zoom-step" id="preview-zoom-in" data-i18n-aria-label="preview_zoom_in" aria-label="Zoom in">+</button>
-              <button type="button" class="preview-zoom-fit" id="preview-zoom-fit" data-i18n="preview_zoom_fit">Fit</button>
-            </div>
-            <div id="preview-empty" class="preview-empty" data-i18n="preview_empty">No file selected.</div>
-            <div id="preview-image-stage" class="preview-media preview-image-stage hidden">
-              <div id="preview-image-frame" class="preview-image-frame">
-                <img id="preview-image" class="preview-image hidden" data-i18n-aria-label="preview_image_alt" alt="Preview of the selected file" />
-                <div id="preview-layout-overlay" class="preview-layout-overlay hidden"></div>
+          <div id="workbench-shell" class="workbench-shell is-settings-collapsed hidden">
+            <div class="workbench-toolbar">
+              <button
+                id="workbench-settings-toggle"
+                class="workbench-settings-toggle"
+                type="button"
+                aria-expanded="false"
+                aria-controls="workbench-sidebar"
+              >
+                OCR settings
+              </button>
+              <div class="workbench-toolbar-status">
+                <span id="workbench-toolbar-status" data-i18n="workbench_status_idle">Idle</span>
+                <span id="workbench-toolbar-model">-</span>
               </div>
             </div>
-            <object id="preview-pdf" class="preview-media hidden" type="application/pdf"></object>
-            <a id="preview-pdf-link" class="hidden" target="_blank" rel="noreferrer" data-i18n="preview_pdf_link">Open PDF in new tab</a>
-          </div>
 
-          <div class="control-row">
-            <button
-              id="advanced-toggle"
-              class="advanced-toggle"
-              type="button"
-              aria-expanded="false"
-              aria-controls="advanced-panel"
-              data-i18n="advanced_toggle"
-            >
-              Expert options
-            </button>
-            <span id="advanced-dirty-hint" class="advanced-dirty-hint hidden" data-i18n="advanced_dirty_hint">
-              Unapplied changes.
-            </span>
-          </div>
-
-          <div id="advanced-panel" class="advanced-panel is-collapsed">
-            <div class="advanced-sections">
-              <details class="advanced-section" open>
-                <summary>
-                  <span data-i18n="advanced_section_workflow">Workflow</span>
-                  <span class="advanced-section-meta" data-i18n="advanced_section_workflow_hint">Mode, task, schema</span>
-                </summary>
-                <div class="advanced-grid">
-                  <label>
-                    <span data-i18n="mode_label">Mode</span>
-                    <select id="mode" name="mode">
-                      <option value="plain" data-i18n="mode_plain">Plain text</option>
-                      <option value="structured" data-i18n="mode_structured">Structured JSON</option>
-                    </select>
-                  </label>
-
-                  <label id="task-wrap">
-                    <span data-i18n="task_label">Task</span>
-                    <select id="task" name="task">
-                      <option value="ocr_text" data-i18n="task_ocr_text">OCR text extraction</option>
-                      <option value="describe_image" data-i18n="task_describe_image">Describe image</option>
-                      <option value="read_scene_text" data-i18n="task_read_scene_text">Read scene text</option>
-                      <option value="extract_table_markdown" data-i18n="task_extract_table">Table</option>
-                      <option value="summarize_document" data-i18n="task_summarize">Summarize document</option>
-                    </select>
-                  </label>
-
-                  <label id="schema-wrap" class="hidden">
-                    <span data-i18n="schema_label">Structured schema</span>
-                    <select id="schema_name" name="schema_name">
-                      <option value="auto" selected data-i18n="schema_auto">Detect automatically</option>
-                      <option value="invoice_basic" data-i18n="schema_invoice">Invoice</option>
-                      <option value="receipt_basic" data-i18n="schema_receipt">Receipt</option>
-                      <option value="table_basic" data-i18n="schema_table">Table</option>
-                      <option value="business_card_basic" data-i18n="schema_business_card">Business card</option>
-                    </select>
-                  </label>
-
-                  <label id="custom-prompt-wrap" class="advanced-field-wide">
-                    <span data-i18n="custom_prompt_label">Custom prompt (optional)</span>
-                    <textarea
-                      id="custom_prompt"
-                      name="custom_prompt"
-                      rows="4"
-                      data-i18n-placeholder="custom_prompt_placeholder"
-                      placeholder="Describe this image in one paragraph."
-                    ></textarea>
-                    <span class="hint" data-i18n="custom_prompt_hint">When set, overrides the selected task preset.</span>
-                  </label>
+            <aside id="workbench-sidebar" class="workbench-sidebar" aria-labelledby="run-settings-title">
+              <div class="workbench-sidebar-head">
+                <div>
+                  <p class="workbench-kicker" data-i18n="workbench_run_kicker">Run settings</p>
+                  <h2 id="run-settings-title" data-i18n="workbench_run_title">OCR pipeline</h2>
                 </div>
-              </details>
+                <span id="workbench-status" class="workbench-status" data-i18n="workbench_status_idle">Idle</span>
+              </div>
 
-              <details class="advanced-section" open>
-                <summary>
-                  <span data-i18n="advanced_section_runtime">Runtime</span>
-                  <span class="advanced-section-meta" data-i18n="advanced_section_runtime_hint">Backend, model, limits</span>
-                </summary>
-                <div class="advanced-grid">
-                  <label>
-                    <span data-i18n="backend_mode_label">Mode</span>
-                    <select id="backend" name="backend">
-                      <option value="direct" {% if default_backend != "expert" %}selected{% endif %}>
-                        Direct
-                      </option>
-                      <option value="expert" {% if default_backend == "expert" %}selected{% endif %}>
-                        Dev
-                      </option>
-                    </select>
-                    <span class="hint" data-i18n="backend_hint">
-                      Dev uses layout detection with region OCR via the vision LLM; Direct uses the legacy path.
-                    </span>
-                  </label>
-
-                  <label>
-                    <span data-i18n="inference_provider_label">Inference provider</span>
-                    <select id="inference_provider" name="inference_provider"></select>
-                    <span class="hint" data-i18n="inference_provider_hint">Vision LLM backend for OCR (e.g. Ollama, vLLM, llama.cpp).</span>
-                  </label>
-
-                  <label class="advanced-field-wide">
-                    <span data-i18n="model_label">Model</span>
-                    <input
-                      id="model"
-                      name="model"
-                      list="model-suggestions"
-                      placeholder="{{ default_model }}"
-                      autocomplete="off"
-                    />
-                    <datalist id="model-suggestions"></datalist>
-                    <span id="model-hint" class="hint"></span>
-                  </label>
-
-                  <label>
-                    <span data-i18n="token_limit_label">Token limit</span>
-                    <input
-                      id="token_limit"
-                      name="token_limit"
-                      type="number"
-                      min="1"
-                      max="128000"
-                      step="1"
-                      placeholder="{{ default_token_limit }}"
-                    />
-                  </label>
-
-                  <label>
-                    <span data-i18n="gif_frames_label">GIF frames (optional)</span>
-                    <input
-                      id="gif_max_frames"
-                      name="gif_max_frames"
-                      type="number"
-                      min="1"
-                      max="32"
-                      step="1"
-                      placeholder="8"
-                    />
-                    <span class="hint" data-i18n="gif_frames_hint">Animated GIFs only. Higher = more coverage, slower.</span>
-                  </label>
+              <div class="workbench-run-summary" data-i18n-aria-label="aria_active_ocr_settings" aria-label="Active OCR settings">
+                <div class="run-summary-item">
+                  <span data-i18n="workbench_summary_backend">Backend</span>
+                  <strong id="summary-backend">-</strong>
                 </div>
-              </details>
-
-              <details class="advanced-section">
-                <summary>
-                  <span data-i18n="advanced_section_layout">Layout</span>
-                  <span class="advanced-section-meta" data-i18n="advanced_section_layout_hint">Regions, thresholds, tables</span>
-                </summary>
-                <div class="advanced-grid">
-                  <label>
-                    <span data-i18n="expert_layout_label">Dev: Layout</span>
-                    <select id="expert_enable_layout" name="expert_enable_layout">
-                      <option value="" selected>
-                        {{ ui.common_default }} ({{ ui.common_on if default_expert_enable_layout else ui.common_off }})
-                      </option>
-                      <option value="true" data-i18n="common_on">On</option>
-                      <option value="false" data-i18n="common_off">Off</option>
-                    </select>
-                    <span class="hint" data-i18n="expert_layout_hint">
-                      Overrides layout per request (Dev mode only).
-                    </span>
-                  </label>
-
-                  <label>
-                    <span data-i18n="expert_layout_threshold_label">Dev: Layout threshold</span>
-                    <input
-                      id="expert_layout_threshold"
-                      name="expert_layout_threshold"
-                      type="number"
-                      min="0"
-                      max="1"
-                      step="0.05"
-                      placeholder="0.2"
-                    />
-                    <span class="hint" data-i18n="expert_layout_threshold_hint">
-                      Confidence threshold for layout (0–1). Lower finds more regions; higher filters uncertain ones.
-                    </span>
-                  </label>
-
-                  <label class="advanced-field-wide">
-                    <span data-i18n="expert_layout_model_label">Dev: Layout model</span>
-                    <select id="expert_layout_model" name="expert_layout_model">
-                      <option value="" selected>{{ ui.common_default }} ({{ default_expert_layout_model }})</option>
-                      <option value="pascalrai/Deformable-DETR-Document-Layout-Analysis">Deformable DETR (DocLayNet, mAP 0.61)</option>
-                      <option value="Aryn/deformable-detr-DocLayNet">Deformable DETR Aryn (DocLayNet)</option>
-                      <option value="docling-project/docling-layout-heron">Docling Heron (RT-DETRv2)</option>
-                      <option value="docling-project/docling-layout-heron-101">Docling Heron 101</option>
-                    </select>
-                    <span class="hint" data-i18n="expert_layout_model_hint">
-                      Layout model for Dev mode. Supports Hugging Face object-detection models.
-                    </span>
-                  </label>
-
-                  <label>
-                    <span data-i18n="expert_table_transformer_label">Dev: Table Transformer</span>
-                    <select id="expert_table_transformer" name="expert_table_transformer">
-                      <option value="" selected>
-                        {{ ui.common_default }} ({{ ui.common_on if default_expert_table_transformer else ui.common_off }})
-                      </option>
-                      <option value="true" data-i18n="common_on">On</option>
-                      <option value="false" data-i18n="common_off">Off</option>
-                    </select>
-                    <span class="hint" data-i18n="expert_table_transformer_hint">
-                      Uses Microsoft Table Transformer for precise table cell boxes (Dev mode only).
-                    </span>
-                  </label>
+                <div class="run-summary-item">
+                  <span data-i18n="workbench_summary_provider">Provider</span>
+                  <strong id="summary-provider">-</strong>
                 </div>
-              </details>
-
-              <details class="advanced-section">
-                <summary>
-                  <span data-i18n="advanced_section_text">Region text</span>
-                  <span class="advanced-section-meta" data-i18n="advanced_section_text_hint">OCR alignment, anchors, words</span>
-                </summary>
-                <div class="advanced-grid">
-                  <label>
-                    <span data-i18n="expert_per_region_ocr_label">Dev: Region OCR</span>
-                    <select id="expert_per_region_ocr" name="expert_per_region_ocr">
-                      <option value="" selected>
-                        {{ ui.common_default }} ({{ ui.common_on if default_expert_per_region_ocr else ui.common_off }})
-                      </option>
-                      <option value="true" data-i18n="common_on">On</option>
-                      <option value="false" data-i18n="common_off">Off</option>
-                    </select>
-                    <span class="hint" data-i18n="expert_per_region_ocr_hint">
-                      Runs OCR per layout region and aligns with page OCR. Off saves time but drops per-region text.
-                    </span>
-                  </label>
-
-                  <label>
-                    <span data-i18n="expert_text_anchor_label">Dev: Text anchor</span>
-                    <select id="expert_text_anchor" name="expert_text_anchor">
-                      <option value="" selected>
-                        {{ ui.common_default }} ({{ ui.common_on if default_expert_text_anchor else ui.common_off }})
-                      </option>
-                      <option value="true" data-i18n="common_on">On</option>
-                      <option value="false" data-i18n="common_off">Off</option>
-                    </select>
-                    <span class="hint" data-i18n="expert_text_anchor_hint">
-                      Fuzzy-match region OCR to page OCR. Off keeps raw region text (helps some tables).
-                    </span>
-                  </label>
-
-                  <label>
-                    <span data-i18n="expert_text_anchor_threshold_label">Dev: Text anchor threshold</span>
-                    <input
-                      id="expert_text_anchor_threshold"
-                      name="expert_text_anchor_threshold"
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="1"
-                      placeholder="{{ default_expert_text_anchor_threshold }}"
-                    />
-                    <span class="hint" data-i18n="expert_text_anchor_threshold_hint" data-i18n-default="{{ default_expert_text_anchor_threshold }}">
-                      Minimum fuzzy score (0–100) to adopt the anchor. Below that, raw region text is used. Default: {{ default_expert_text_anchor_threshold }}.
-                    </span>
-                  </label>
-
-                  <label>
-                    <span data-i18n="expert_word_detector_label">Dev: Word detector</span>
-                    <select id="expert_word_detector" name="expert_word_detector">
-                      <option value="" selected>
-                        {{ ui.common_default }} ({{ default_expert_word_detector or ui.common_off }})
-                      </option>
-                      <option value="none" data-i18n="common_off">Off</option>
-                      <option value="paddleocr">PaddleOCR</option>
-                      <option value="doctr">DocTR</option>
-                    </select>
-                    <span class="hint" data-i18n="expert_word_detector_hint">
-                      Optional word detector for word boxes (PaddleOCR or DocTR, Dev mode only).
-                    </span>
-                  </label>
+                <div class="run-summary-item">
+                  <span data-i18n="workbench_summary_mode">Mode</span>
+                  <strong id="summary-mode">-</strong>
                 </div>
-              </details>
-
-              <details class="advanced-section">
-                <summary>
-                  <span data-i18n="advanced_section_compare">Compare</span>
-                  <span class="advanced-section-meta" data-i18n="advanced_section_compare_hint">Diff and word-box behavior</span>
-                </summary>
-                <div class="advanced-grid">
-                  <label class="advanced-field-wide">
-                    <span data-i18n="expert_compare_include_detector_only_label">Dev: Compare — detector-only words</span>
-                    <select
-                      id="expert_compare_include_detector_only"
-                      name="expert_compare_include_detector_only"
-                    >
-                      <option value="" selected>
-                        {{ ui.common_default }} ({{ ui.common_on if default_expert_compare_include_detector_only else ui.common_off }})
-                      </option>
-                      <option value="true" data-i18n="common_on">On</option>
-                      <option value="false" data-i18n="common_off">Off</option>
-                    </select>
-                    <span class="hint" data-i18n="expert_compare_include_detector_only_hint">
-                      Off (default): compare uses raw OCR tokens only. On: adds DocTR boxes without a raw token (may duplicate).
-                    </span>
-                  </label>
+                <div class="run-summary-item">
+                  <span data-i18n="workbench_summary_model">Model</span>
+                  <strong id="summary-model">-</strong>
                 </div>
-              </details>
+                <div class="run-summary-item">
+                  <span data-i18n="workbench_summary_layout">Layout</span>
+                  <strong id="summary-layout">-</strong>
+                </div>
+                <div class="run-summary-item">
+                  <span data-i18n="workbench_summary_words">Words</span>
+                  <strong id="summary-words">-</strong>
+                </div>
+              </div>
 
-              <div class="advanced-apply-row">
-                <button id="apply-options-btn" class="secondary-action" type="button" disabled data-i18n="advanced_apply">
-                  Apply changes
+              <div class="control-row">
+                <button
+                  id="advanced-toggle"
+                  class="advanced-toggle"
+                  type="button"
+                  aria-expanded="false"
+                  aria-controls="advanced-panel"
+                  data-i18n="advanced_toggle"
+                >
+                  Expert options
                 </button>
+                <span id="advanced-dirty-hint" class="advanced-dirty-hint hidden" data-i18n="advanced_dirty_hint">
+                  Unapplied changes.
+                </span>
               </div>
-            </div>
+
+              <div id="advanced-panel" class="advanced-panel is-collapsed">
+                <div class="advanced-sections">
+                  <details class="advanced-section" open>
+                    <summary>
+                      <span data-i18n="advanced_section_workflow">Workflow</span>
+                      <span class="advanced-section-meta" data-i18n="advanced_section_workflow_hint">Mode, task, schema</span>
+                    </summary>
+                    <div class="advanced-grid">
+                      <label>
+                        <span data-i18n="mode_label">Mode</span>
+                        <select id="mode" name="mode">
+                          <option value="plain" data-i18n="mode_plain">Plain text</option>
+                          <option value="structured" data-i18n="mode_structured">Structured JSON</option>
+                        </select>
+                      </label>
+
+                      <label id="task-wrap">
+                        <span data-i18n="task_label">Task</span>
+                        <select id="task" name="task">
+                          <option value="ocr_text" data-i18n="task_ocr_text">OCR text extraction</option>
+                          <option value="describe_image" data-i18n="task_describe_image">Describe image</option>
+                          <option value="read_scene_text" data-i18n="task_read_scene_text">Read scene text</option>
+                          <option value="extract_table_markdown" data-i18n="task_extract_table">Table</option>
+                          <option value="summarize_document" data-i18n="task_summarize">Summarize document</option>
+                        </select>
+                      </label>
+
+                      <label id="schema-wrap" class="hidden">
+                        <span data-i18n="schema_label">Structured schema</span>
+                        <select id="schema_name" name="schema_name">
+                          <option value="auto" selected data-i18n="schema_auto">Detect automatically</option>
+                          <option value="invoice_basic" data-i18n="schema_invoice">Invoice</option>
+                          <option value="receipt_basic" data-i18n="schema_receipt">Receipt</option>
+                          <option value="table_basic" data-i18n="schema_table">Table</option>
+                          <option value="business_card_basic" data-i18n="schema_business_card">Business card</option>
+                        </select>
+                      </label>
+
+                      <label id="custom-prompt-wrap" class="advanced-field-wide">
+                        <span data-i18n="custom_prompt_label">Custom prompt (optional)</span>
+                        <textarea
+                          id="custom_prompt"
+                          name="custom_prompt"
+                          rows="4"
+                          data-i18n-placeholder="custom_prompt_placeholder"
+                          placeholder="Describe this image in one paragraph."
+                        ></textarea>
+                        <span class="hint" data-i18n="custom_prompt_hint">When set, overrides the selected task preset.</span>
+                      </label>
+                    </div>
+                  </details>
+
+                  <details class="advanced-section" open>
+                    <summary>
+                      <span data-i18n="advanced_section_runtime">Runtime</span>
+                      <span class="advanced-section-meta" data-i18n="advanced_section_runtime_hint">Backend, model, limits</span>
+                    </summary>
+                    <div class="advanced-grid">
+                      <label>
+                        <span data-i18n="backend_mode_label">Mode</span>
+                        <select id="backend" name="backend">
+                          <option value="direct" {% if default_backend != "expert" %}selected{% endif %}>
+                            Direct
+                          </option>
+                          <option value="expert" {% if default_backend == "expert" %}selected{% endif %}>
+                            Dev
+                          </option>
+                        </select>
+                        <span class="hint" data-i18n="backend_hint">
+                          Dev uses layout detection with region OCR via the vision LLM; Direct uses the legacy path.
+                        </span>
+                      </label>
+
+                      <label>
+                        <span data-i18n="inference_provider_label">Inference provider</span>
+                        <select id="inference_provider" name="inference_provider"></select>
+                        <span class="hint" data-i18n="inference_provider_hint">Vision LLM backend for OCR (e.g. Ollama, vLLM, llama.cpp).</span>
+                      </label>
+
+                      <label class="advanced-field-wide">
+                        <span data-i18n="model_label">Model</span>
+                        <input
+                          id="model"
+                          name="model"
+                          list="model-suggestions"
+                          placeholder="{{ default_model }}"
+                          autocomplete="off"
+                        />
+                        <datalist id="model-suggestions"></datalist>
+                        <span id="model-hint" class="hint"></span>
+                      </label>
+
+                      <label>
+                        <span data-i18n="token_limit_label">Token limit</span>
+                        <input
+                          id="token_limit"
+                          name="token_limit"
+                          type="number"
+                          min="1"
+                          max="128000"
+                          step="1"
+                          placeholder="{{ default_token_limit }}"
+                        />
+                      </label>
+
+                      <label>
+                        <span data-i18n="gif_frames_label">GIF frames (optional)</span>
+                        <input
+                          id="gif_max_frames"
+                          name="gif_max_frames"
+                          type="number"
+                          min="1"
+                          max="32"
+                          step="1"
+                          placeholder="8"
+                        />
+                        <span class="hint" data-i18n="gif_frames_hint">Animated GIFs only. Higher = more coverage, slower.</span>
+                      </label>
+                    </div>
+                  </details>
+
+                  <details class="advanced-section">
+                    <summary>
+                      <span data-i18n="advanced_section_layout">Layout</span>
+                      <span class="advanced-section-meta" data-i18n="advanced_section_layout_hint">Regions, thresholds, tables</span>
+                    </summary>
+                    <div class="advanced-grid">
+                      <label>
+                        <span data-i18n="expert_layout_label">Dev: Layout</span>
+                        <select id="expert_enable_layout" name="expert_enable_layout">
+                          <option value="" selected>
+                            {{ ui.common_default }} ({{ ui.common_on if default_expert_enable_layout else ui.common_off }})
+                          </option>
+                          <option value="true" data-i18n="common_on">On</option>
+                          <option value="false" data-i18n="common_off">Off</option>
+                        </select>
+                        <span class="hint" data-i18n="expert_layout_hint">
+                          Overrides layout per request (Dev mode only).
+                        </span>
+                      </label>
+
+                      <label>
+                        <span data-i18n="expert_layout_threshold_label">Dev: Layout threshold</span>
+                        <input
+                          id="expert_layout_threshold"
+                          name="expert_layout_threshold"
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.05"
+                          placeholder="0.2"
+                        />
+                        <span class="hint" data-i18n="expert_layout_threshold_hint">
+                          Confidence threshold for layout (0–1). Lower finds more regions; higher filters uncertain ones.
+                        </span>
+                      </label>
+
+                      <label class="advanced-field-wide">
+                        <span data-i18n="expert_layout_model_label">Dev: Layout model</span>
+                        <select id="expert_layout_model" name="expert_layout_model">
+                          <option value="" selected>{{ ui.common_default }} ({{ default_expert_layout_model }})</option>
+                          <option value="pascalrai/Deformable-DETR-Document-Layout-Analysis">Deformable DETR (DocLayNet, mAP 0.61)</option>
+                          <option value="Aryn/deformable-detr-DocLayNet">Deformable DETR Aryn (DocLayNet)</option>
+                          <option value="docling-project/docling-layout-heron">Docling Heron (RT-DETRv2)</option>
+                          <option value="docling-project/docling-layout-heron-101">Docling Heron 101</option>
+                        </select>
+                        <span class="hint" data-i18n="expert_layout_model_hint">
+                          Layout model for Dev mode. Supports Hugging Face object-detection models.
+                        </span>
+                      </label>
+
+                      <label>
+                        <span data-i18n="expert_table_transformer_label">Dev: Table Transformer</span>
+                        <select id="expert_table_transformer" name="expert_table_transformer">
+                          <option value="" selected>
+                            {{ ui.common_default }} ({{ ui.common_on if default_expert_table_transformer else ui.common_off }})
+                          </option>
+                          <option value="true" data-i18n="common_on">On</option>
+                          <option value="false" data-i18n="common_off">Off</option>
+                        </select>
+                        <span class="hint" data-i18n="expert_table_transformer_hint">
+                          Uses Microsoft Table Transformer for precise table cell boxes (Dev mode only).
+                        </span>
+                      </label>
+                    </div>
+                  </details>
+
+                  <details class="advanced-section">
+                    <summary>
+                      <span data-i18n="advanced_section_text">Region text</span>
+                      <span class="advanced-section-meta" data-i18n="advanced_section_text_hint">OCR alignment, anchors, words</span>
+                    </summary>
+                    <div class="advanced-grid">
+                      <label>
+                        <span data-i18n="expert_per_region_ocr_label">Dev: Region OCR</span>
+                        <select id="expert_per_region_ocr" name="expert_per_region_ocr">
+                          <option value="" selected>
+                            {{ ui.common_default }} ({{ ui.common_on if default_expert_per_region_ocr else ui.common_off }})
+                          </option>
+                          <option value="true" data-i18n="common_on">On</option>
+                          <option value="false" data-i18n="common_off">Off</option>
+                        </select>
+                        <span class="hint" data-i18n="expert_per_region_ocr_hint">
+                          Runs OCR per layout region and aligns with page OCR. Off saves time but drops per-region text.
+                        </span>
+                      </label>
+
+                      <label>
+                        <span data-i18n="expert_text_anchor_label">Dev: Text anchor</span>
+                        <select id="expert_text_anchor" name="expert_text_anchor">
+                          <option value="" selected>
+                            {{ ui.common_default }} ({{ ui.common_on if default_expert_text_anchor else ui.common_off }})
+                          </option>
+                          <option value="true" data-i18n="common_on">On</option>
+                          <option value="false" data-i18n="common_off">Off</option>
+                        </select>
+                        <span class="hint" data-i18n="expert_text_anchor_hint">
+                          Fuzzy-match region OCR to page OCR. Off keeps raw region text (helps some tables).
+                        </span>
+                      </label>
+
+                      <label>
+                        <span data-i18n="expert_text_anchor_threshold_label">Dev: Text anchor threshold</span>
+                        <input
+                          id="expert_text_anchor_threshold"
+                          name="expert_text_anchor_threshold"
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="1"
+                          placeholder="{{ default_expert_text_anchor_threshold }}"
+                        />
+                        <span class="hint" data-i18n="expert_text_anchor_threshold_hint" data-i18n-default="{{ default_expert_text_anchor_threshold }}">
+                          Minimum fuzzy score (0–100) to adopt the anchor. Below that, raw region text is used. Default: {{ default_expert_text_anchor_threshold }}.
+                        </span>
+                      </label>
+
+                      <label>
+                        <span data-i18n="expert_word_detector_label">Dev: Word detector</span>
+                        <select id="expert_word_detector" name="expert_word_detector">
+                          <option value="" selected>
+                            {{ ui.common_default }} ({{ default_expert_word_detector or ui.common_off }})
+                          </option>
+                          <option value="none" data-i18n="common_off">Off</option>
+                          <option value="paddleocr">PaddleOCR</option>
+                          <option value="doctr">DocTR</option>
+                        </select>
+                        <span class="hint" data-i18n="expert_word_detector_hint">
+                          Optional word detector for word boxes (PaddleOCR or DocTR, Dev mode only).
+                        </span>
+                      </label>
+                    </div>
+                  </details>
+
+                  <details class="advanced-section">
+                    <summary>
+                      <span data-i18n="advanced_section_compare">Compare</span>
+                      <span class="advanced-section-meta" data-i18n="advanced_section_compare_hint">Diff and word-box behavior</span>
+                    </summary>
+                    <div class="advanced-grid">
+                      <label class="advanced-field-wide">
+                        <span data-i18n="expert_compare_include_detector_only_label">Dev: Compare — detector-only words</span>
+                        <select
+                          id="expert_compare_include_detector_only"
+                          name="expert_compare_include_detector_only"
+                        >
+                          <option value="" selected>
+                            {{ ui.common_default }} ({{ ui.common_on if default_expert_compare_include_detector_only else ui.common_off }})
+                          </option>
+                          <option value="true" data-i18n="common_on">On</option>
+                          <option value="false" data-i18n="common_off">Off</option>
+                        </select>
+                        <span class="hint" data-i18n="expert_compare_include_detector_only_hint">
+                          Off (default): compare uses raw OCR tokens only. On: adds DocTR boxes without a raw token (may duplicate).
+                        </span>
+                      </label>
+                    </div>
+                  </details>
+
+                  <div class="advanced-apply-row">
+                    <button id="apply-options-btn" class="secondary-action" type="button" disabled data-i18n="advanced_apply">
+                      Apply changes
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </aside>
+
+            <section class="workbench-viewer" aria-labelledby="document-viewer-title">
+              <div id="preview-wrap" class="preview-wrap hidden">
+                <div class="preview-head">
+                  <div>
+                    <p class="preview-title" id="document-viewer-title" data-i18n="preview_title">Preview</p>
+                    <p class="preview-drop-hint" data-i18n="preview_drop_hint">
+                      Drag a file into the browser window and release to replace.
+                    </p>
+                  </div>
+                  <button id="change-file-btn" class="change-file-btn" type="button" data-i18n="preview_change_file">Change file</button>
+                </div>
+                <div id="page-selector-wrap" class="page-selector-wrap hidden">
+                  <label for="page-selector"><span data-i18n="preview_page_label">Page:</span></label>
+                  <select id="page-selector"></select>
+                </div>
+                <div id="preview-zoom" class="preview-zoom hidden">
+                  <button type="button" class="preview-zoom-step" id="preview-zoom-out" data-i18n-aria-label="preview_zoom_out" aria-label="Zoom out">−</button>
+                  <input type="range" id="preview-zoom-slider" min="0.5" max="3" step="0.05" value="1" />
+                  <span id="preview-zoom-value" class="preview-zoom-value">100 %</span>
+                  <button type="button" class="preview-zoom-step" id="preview-zoom-in" data-i18n-aria-label="preview_zoom_in" aria-label="Zoom in">+</button>
+                  <button type="button" class="preview-zoom-fit" id="preview-zoom-fit" data-i18n="preview_zoom_fit">Fit</button>
+                </div>
+                <div id="preview-empty" class="preview-empty" data-i18n="preview_empty">No file selected.</div>
+                <div id="preview-image-stage" class="preview-media preview-image-stage hidden">
+                  <div id="preview-image-frame" class="preview-image-frame">
+                    <img id="preview-image" class="preview-image hidden" data-i18n-aria-label="preview_image_alt" alt="Preview of the selected file" />
+                    <div id="preview-layout-overlay" class="preview-layout-overlay hidden"></div>
+                  </div>
+                </div>
+                <object id="preview-pdf" class="preview-media hidden" type="application/pdf"></object>
+                <a id="preview-pdf-link" class="hidden" target="_blank" rel="noreferrer" data-i18n="preview_pdf_link">Open PDF in new tab</a>
+              </div>
+            </section>
           </div>
         </form>
       </section>
