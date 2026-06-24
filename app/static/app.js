@@ -10,6 +10,14 @@ const schemaWrap = document.getElementById("schema-wrap");
 const advancedPanelEl = document.getElementById("advanced-panel");
 const advancedToggleEl = document.getElementById("advanced-toggle");
 const onboardingCardEl = document.getElementById("onboarding-card");
+const workbenchShellEl = document.getElementById("workbench-shell");
+const workbenchStatusEl = document.getElementById("workbench-status");
+const summaryBackendEl = document.getElementById("summary-backend");
+const summaryProviderEl = document.getElementById("summary-provider");
+const summaryModeEl = document.getElementById("summary-mode");
+const summaryModelEl = document.getElementById("summary-model");
+const summaryLayoutEl = document.getElementById("summary-layout");
+const summaryWordsEl = document.getElementById("summary-words");
 const dropzoneEl = document.getElementById("dropzone");
 const pickFileBtnEl = document.getElementById("pick-file-btn");
 const changeFileBtnEl = document.getElementById("change-file-btn");
@@ -134,6 +142,7 @@ let previewUrl = null;
 let activeRequestController = null;
 let globalDragDepth = 0;
 let hasPendingAdvancedChanges = false;
+let currentWorkbenchStatusKey = "workbench_status_idle";
 let activeResultView = "layout";
 let pageImageDataUrls = [];
 let currentPageIndex = 0;
@@ -263,6 +272,47 @@ function toggleModeDependentFields() {
   customPromptWrap.classList.toggle("hidden", isStructuredMode(modeEl.value));
 }
 
+function selectedOptionText(el) {
+  if (!el) return "-";
+  const selected = el.selectedOptions?.[0];
+  const label = selected?.textContent?.trim() || el.value || "-";
+  return label.replace(/\s+/g, " ");
+}
+
+function inputValueOrPlaceholder(el, fallback = "-") {
+  if (!el) return fallback;
+  const value = String(el.value || "").trim();
+  if (value) return value;
+  const placeholder = String(el.getAttribute("placeholder") || "").trim();
+  return placeholder || fallback;
+}
+
+function setWorkbenchStatus(key) {
+  currentWorkbenchStatusKey = key;
+  if (!workbenchStatusEl) return;
+  workbenchStatusEl.textContent = tr(key);
+  workbenchStatusEl.dataset.status = key.replace("workbench_status_", "");
+}
+
+function updateRunSummary() {
+  const backendEl = document.getElementById("backend");
+  const providerEl = document.getElementById("inference_provider");
+  const layoutEl = document.getElementById("expert_enable_layout");
+  const wordDetectorEl = document.getElementById("expert_word_detector");
+  const modelEl = document.getElementById("model");
+  if (summaryBackendEl) summaryBackendEl.textContent = selectedOptionText(backendEl);
+  if (summaryProviderEl) summaryProviderEl.textContent = selectedOptionText(providerEl);
+  if (summaryModeEl) summaryModeEl.textContent = selectedOptionText(modeEl);
+  if (summaryModelEl) {
+    summaryModelEl.textContent = inputValueOrPlaceholder(
+      modelEl,
+      document.body?.dataset.defaultModel || "-",
+    );
+  }
+  if (summaryLayoutEl) summaryLayoutEl.textContent = selectedOptionText(layoutEl);
+  if (summaryWordsEl) summaryWordsEl.textContent = selectedOptionText(wordDetectorEl);
+}
+
 function setAdvancedOpen(isOpen) {
   advancedPanelEl.classList.toggle("is-collapsed", !isOpen);
   advancedPanelEl.toggleAttribute("inert", !isOpen);
@@ -287,6 +337,7 @@ function setAdvancedDirty(isDirty) {
   hasPendingAdvancedChanges = isDirty;
   applyOptionsBtnEl.disabled = !isDirty;
   advancedDirtyHintEl.classList.toggle("hidden", !isDirty);
+  updateRunSummary();
 }
 
 function clearOutput() {
@@ -314,6 +365,7 @@ function setWorkspaceVisible(isVisible) {
     pageEl.classList.toggle("has-workspace", isVisible);
   }
   onboardingCardEl.classList.toggle("hidden", isVisible);
+  workbenchShellEl?.classList.toggle("hidden", !isVisible);
   previewWrapEl.classList.toggle("hidden", !isVisible);
   resultPanelEl.classList.toggle("hidden", !isVisible);
 }
@@ -2474,6 +2526,7 @@ async function runOCR() {
       activeRequestController = null;
     }
     setLoading(false);
+    setWorkbenchStatus("workbench_status_idle");
     metaEl.textContent = tr("meta_pick_file");
     clearOutput();
     setWorkspaceVisible(false);
@@ -2489,6 +2542,8 @@ async function runOCR() {
   setLoading(true);
   clearOutput();
   setWorkspaceVisible(true);
+  updateRunSummary();
+  setWorkbenchStatus("workbench_status_running");
   metaEl.textContent = tr("meta_running");
 
   try {
@@ -2510,10 +2565,12 @@ async function runOCR() {
       requestTask,
       backendFallback: String(payload.get("backend") || "direct"),
     });
+    setWorkbenchStatus("workbench_status_ready");
   } catch (error) {
     if (error.name === "AbortError") {
       return;
     }
+    setWorkbenchStatus("workbench_status_error");
     metaEl.textContent = tr("meta_error", { message: error.message });
   } finally {
     if (activeRequestController === controller) {
@@ -2689,18 +2746,27 @@ previewImageEl.addEventListener("error", () => {
 });
 modeEl.addEventListener("change", () => {
   toggleModeDependentFields();
+  updateRunSummary();
 });
 advancedPanelEl.addEventListener("change", () => {
   setAdvancedDirty(true);
+  updateRunSummary();
 });
 advancedPanelEl.addEventListener("input", () => {
   setAdvancedDirty(true);
+  updateRunSummary();
 });
 advancedPanelEl
   .querySelectorAll("input, select, textarea")
   .forEach((el) => {
-    el.addEventListener("change", () => setAdvancedDirty(true));
-    el.addEventListener("input", () => setAdvancedDirty(true));
+    el.addEventListener("change", () => {
+      setAdvancedDirty(true);
+      updateRunSummary();
+    });
+    el.addEventListener("input", () => {
+      setAdvancedDirty(true);
+      updateRunSummary();
+    });
   });
 form.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -2723,6 +2789,13 @@ setWorkspaceVisible(false);
 clearPreview();
 setLoading(false);
 setAdvancedDirty(false);
+setWorkbenchStatus("workbench_status_idle");
+updateRunSummary();
+
+document.addEventListener("docread:locale-change", () => {
+  setWorkbenchStatus(currentWorkbenchStatusKey);
+  updateRunSummary();
+});
 
 copyBtn.addEventListener("click", async () => {
   const text = lastResponse && lastResponse.mode === "structured" && lastResponse.structured
@@ -2852,6 +2925,7 @@ async function _refreshModelSuggestions() {
   if (modelEl && !modelEl.value.trim() && _defaultModelName) {
     modelEl.placeholder = _defaultModelName;
   }
+  updateRunSummary();
 }
 
 async function _initInferenceControls() {
@@ -2875,6 +2949,7 @@ async function _initInferenceControls() {
 
 inferenceProviderEl?.addEventListener("change", () => {
   localStorage.setItem(INFERENCE_PROVIDER_KEY, inferenceProviderEl.value);
+  updateRunSummary();
   void _refreshModelSuggestions();
   if (ourModelSelectEl || theirModelSelectEl) {
     _localModelsCacheByProvider = {};
