@@ -1193,8 +1193,8 @@ button:disabled {
 }
 
 .preview-layout-shape {
-  --layout-region-accent: color-mix(in srgb, #ff7b54 78%, #fff 22%);
-  --layout-region-fill: color-mix(in srgb, #ff7b54 14%, transparent);
+  --layout-region-accent: color-mix(in srgb, #5b6577 78%, #fff 22%);
+  --layout-region-fill: color-mix(in srgb, #5b6577 14%, transparent);
   fill: var(--layout-region-fill);
   stroke: var(--layout-region-accent);
   stroke-width: 0.25;
@@ -1202,8 +1202,8 @@ button:disabled {
 }
 
 .preview-layout-box {
-  --layout-region-accent: color-mix(in srgb, #ff7b54 78%, #fff 22%);
-  --layout-region-fill: color-mix(in srgb, #ff7b54 14%, transparent);
+  --layout-region-accent: color-mix(in srgb, #5b6577 78%, #fff 22%);
+  --layout-region-fill: color-mix(in srgb, #5b6577 14%, transparent);
   --layout-region-ink: rgb(17 12 9 / 82%);
   position: absolute;
   border: 2px solid var(--layout-region-accent);
@@ -1817,8 +1817,8 @@ pre {
 }
 
 .layout-region-item {
-  --layout-region-accent: color-mix(in srgb, #ff7b54 78%, #fff 22%);
-  --layout-region-fill: color-mix(in srgb, #ff7b54 10%, transparent);
+  --layout-region-accent: color-mix(in srgb, #5b6577 78%, #fff 22%);
+  --layout-region-fill: color-mix(in srgb, #5b6577 10%, transparent);
   display: grid;
   gap: 0.2rem;
   border-left: 0.28rem solid var(--layout-region-accent);
@@ -1927,8 +1927,8 @@ pre {
 .layout-region-item[data-region-kind="text"],
 .word-region-group[data-region-kind="text"],
 .preview-word-shape[data-region-kind="text"] {
-  --layout-region-accent: color-mix(in srgb, #ef6c47 82%, #fff 18%);
-  --layout-region-fill: color-mix(in srgb, #ef6c47 12%, transparent);
+  --layout-region-accent: color-mix(in srgb, #5b6577 82%, #fff 18%);
+  --layout-region-fill: color-mix(in srgb, #5b6577 12%, transparent);
 }
 
 .preview-layout-box[data-region-kind="table"],
@@ -1936,8 +1936,8 @@ pre {
 .layout-region-item[data-region-kind="table"],
 .word-region-group[data-region-kind="table"],
 .preview-word-shape[data-region-kind="table"] {
-  --layout-region-accent: color-mix(in srgb, #1b8f5a 82%, #fff 18%);
-  --layout-region-fill: color-mix(in srgb, #1b8f5a 14%, transparent);
+  --layout-region-accent: color-mix(in srgb, #2f7d57 82%, #fff 18%);
+  --layout-region-fill: color-mix(in srgb, #2f7d57 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="title"],
@@ -1945,8 +1945,8 @@ pre {
 .layout-region-item[data-region-kind="title"],
 .word-region-group[data-region-kind="title"],
 .preview-word-shape[data-region-kind="title"] {
-  --layout-region-accent: color-mix(in srgb, #c95f1a 82%, #fff 18%);
-  --layout-region-fill: color-mix(in srgb, #c95f1a 14%, transparent);
+  --layout-region-accent: color-mix(in srgb, #9a6a2c 82%, #fff 18%);
+  --layout-region-fill: color-mix(in srgb, #9a6a2c 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="figure"],
@@ -1954,8 +1954,8 @@ pre {
 .layout-region-item[data-region-kind="figure"],
 .word-region-group[data-region-kind="figure"],
 .preview-word-shape[data-region-kind="figure"] {
-  --layout-region-accent: color-mix(in srgb, #2b79c2 82%, #fff 18%);
-  --layout-region-fill: color-mix(in srgb, #2b79c2 14%, transparent);
+  --layout-region-accent: color-mix(in srgb, #45599a 82%, #fff 18%);
+  --layout-region-fill: color-mix(in srgb, #45599a 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="caption"],
@@ -1963,8 +1963,8 @@ pre {
 .layout-region-item[data-region-kind="caption"],
 .word-region-group[data-region-kind="caption"],
 .preview-word-shape[data-region-kind="caption"] {
-  --layout-region-accent: color-mix(in srgb, #7d67c8 82%, #fff 18%);
-  --layout-region-fill: color-mix(in srgb, #7d67c8 14%, transparent);
+  --layout-region-accent: color-mix(in srgb, #6f5a9c 82%, #fff 18%);
+  --layout-region-fill: color-mix(in srgb, #6f5a9c 14%, transparent);
 }
 
 .preview-layout-box[data-region-kind="list"],
