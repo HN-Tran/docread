@@ -265,6 +265,8 @@ function toggleModeDependentFields() {
 
 function setAdvancedOpen(isOpen) {
   advancedPanelEl.classList.toggle("is-collapsed", !isOpen);
+  advancedPanelEl.toggleAttribute("inert", !isOpen);
+  advancedPanelEl.setAttribute("aria-hidden", String(!isOpen));
   advancedToggleEl.setAttribute("aria-expanded", String(isOpen));
   advancedToggleEl.textContent = isOpen ? tr("advanced_toggle_hide") : tr("advanced_toggle");
 }
